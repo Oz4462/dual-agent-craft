@@ -18,6 +18,11 @@
   Kollision->Abbruch ohne Overwrite, Verify-rot->Block.
 - PS-5.1-Lektion: nie `$?` nach nativem git; `$ErrorActionPreference="Continue"` +
   `$LASTEXITCODE` pruefen (sonst terminiert git-stderr faelschlich).
+- **grok `--worktree` greift HEADLESS NICHT** (Grok baut sonst im Main-Tree). Fix: worktree
+  selbst anlegen (`git worktree add -b feat/poc <pfad> main`) + Grok mit `--cwd <pfad>` hineinschicken.
+- **End-to-End-Loop real bewiesen 2026-06-16:** Contract->Grok-Render(isoliert)->Assess->No-Cut-Gate
+  ->Merge. Grok lieferte korrekten Code + unaufgefordert `SUGGESTIONS`. Default-Branch hier ist `main`
+  (umbenannt von `master`).
 
 ## Protokoll (Kurz)
 CRAFT-Loop: Contract -> Render(Grok) -> Assess -> Fortify -> Test. Regeln in `PROTOCOL.md`,
@@ -25,8 +30,9 @@ Staffelstab in `HANDOFF.md`. Invarianten: ein Schreiber pro Datei-Raum, getrennt
 Merge nur via `dual-merge.ps1`, kein falsches "fertig", kein Alt-Kontext.
 
 ## Offen
-- Erster echter **Render-Lauf** (Grok baut POC im worktree, `--best-of-n`+`--worktree`
-  zusammen) noch nicht ausgefuehrt — beim ersten Feature verifizieren.
+- `--best-of-n > 1` (mehrere Varianten parallel) noch nicht real getestet — nur N=1 lief.
+- Hook-Edits (`.no-recap`-Opt-out) liegen im Live-Install `~/.claude`, noch nicht in
+  canonical Source `Desktop\CLAUDE_WORKFLOW` gesynct (Drift).
 
 ## Kontaminations-Hinweis (Root-Cause gefixt 2026-06-16)
 - `.no-recap`-Marker hier aktiv -> globale Hooks `session_start.py` (kein Recap injizieren)
