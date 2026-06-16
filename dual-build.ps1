@@ -58,10 +58,6 @@ $planText = (Get-Content $Plan -Raw).Trim()
 if ([string]::IsNullOrWhiteSpace($planText)) { Fail "$Plan ist leer." }
 if ($planText -match "<Feature-Name>|<Was soll gebaut") { Fail "$Plan ist noch das Template - erst ausfuellen." }
 
-# PLAN.md muss committet sein, damit der worktree-Branch ihn enthaelt
-$dirty = git status --porcelain $Plan
-if ($dirty) { Fail "$Plan ist uncommitted. Erst committen, dann bauen." }
-
 # --- Phase 1: Composed prompt ----------------------------------------------
 $tmpDir = ".dual-agent\tmp"; $logDir = ".dual-agent\logs"
 New-Item -ItemType Directory -Force -Path $tmpDir, $logDir | Out-Null
@@ -107,11 +103,29 @@ Write-Host "Aufruf   : grok $($grokArgs -join ' ')"
 
 if ($DryRun) { Write-Host "DryRun - kein Aufruf." -ForegroundColor Yellow; exit 0 }
 
-# frischen worktree anlegen (alten Branch/worktree gleichen Namens vorher raeumen)
+# WIP-Basis sichern: ein worktree branched von einem COMMIT, nicht vom working-tree.
+# Damit Grok die aktuelle (uncommittete) Arbeit sieht, committen wir WIP zuerst auf einen
+# Feature-Branch (kein Push); $Into bleibt sauber. Fliessend, kein manueller git-Tanz.
+if (git status --porcelain) {
+    $curBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+    if ($curBranch -eq $Into) {
+        $wipBranch = "feat/wip-$stamp"
+        git switch -c $wipBranch 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "konnte WIP-Feature-Branch $wipBranch nicht anlegen." }
+        Write-Host "WIP -> neuer Feature-Branch $wipBranch ($Into bleibt sauber, kein Push)." -ForegroundColor DarkCyan
+    } else {
+        $wipBranch = $curBranch
+    }
+    git add -A
+    git commit -q -m "wip: dual-agent base $stamp [no-push]" 2>$null | Out-Null
+    Write-Host "WIP committet auf $wipBranch -> Grok sieht die aktuelle Basis." -ForegroundColor DarkCyan
+}
+
+# frischen worktree anlegen (von HEAD = aktuelle Basis inkl. WIP), alten gleichnamigen raeumen
 git worktree remove --force $wtPath 2>$null | Out-Null
 git branch -D $Branch 2>$null | Out-Null
-git worktree add -b $Branch $wtPath $Into 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail "worktree add fehlgeschlagen ($Branch von $Into)." }
+git worktree add -b $Branch $wtPath HEAD 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) { Fail "worktree add fehlgeschlagen ($Branch von HEAD)." }
 
 & grok @grokArgs *>&1 | Tee-Object -FilePath $logFile
 $grokExit = $LASTEXITCODE

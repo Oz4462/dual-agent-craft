@@ -33,6 +33,10 @@
 - **Split-Screen-Cockpit:** `dual-view.ps1` (Windows Terminal, links Claude / rechts Grok-Live-Log
   via `watch-grok.ps1`, das `.dual-agent/logs/grok-*.log` live tailt). `wt` vorhanden, tmux nicht.
 
+- **WIP-Basis-Fix (verifiziert):** `dual-build.ps1` committet uncommittete Arbeit vor dem Render
+  automatisch (auf `main` -> neuer `feat/wip-<stamp>`, kein Push, `main` bleibt sauber), `feat/poc`
+  branched von HEAD -> Grok sieht tracked+untracked WIP. Test: worktree=WIP-CHANGE+untracked, main=base.
+
 ## Protokoll (Kurz)
 CRAFT-Loop: Contract -> Render(Grok) -> Assess -> Fortify -> Test. Regeln in `PROTOCOL.md`,
 Staffelstab in `HANDOFF.md`. Invarianten: ein Schreiber pro Datei-Raum, getrennte worktrees,

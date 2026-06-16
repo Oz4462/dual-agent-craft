@@ -78,6 +78,18 @@ beide Server-Befehle starten real. Prereqs: `node`/`npx` + `uv`/`uvx` im PATH (E
 
 Voraussetzung: Windows Terminal (`wt`) sowie `claude`/`grok` im PATH.
 
+## WIP-Handling (automatisch, fliessend)
+
+Ein git-worktree branched von einem **Commit**, nicht vom working-tree — uncommittete Arbeit
+waere fuer Grok unsichtbar. `dual-build.ps1` loest das automatisch, ohne manuellen git-Tanz:
+- Auf `main` mit dirty WIP -> Feature-Branch `feat/wip-<stamp>` wird angelegt, WIP dort committet
+  (kein Push). `main` bleibt sauber; dein Checkout liegt danach auf `feat/wip-<stamp>`.
+- Schon auf einem Feature-Branch -> WIP wird dort committet.
+- `feat/poc` (Groks Bau) branched von **HEAD** = aktueller Stand inkl. WIP.
+
+PLAN.md muss daher NICHT mehr manuell committet werden. Der `wip:`-Commit ist lokal; nach dem
+Merge kannst du ihn bei Bedarf squashen.
+
 ## Troubleshooting
 
 - **Error-Spam `AuthorizationRequired ... huggingface.co/.../mcp`:** ein kaputter MCP-Server
