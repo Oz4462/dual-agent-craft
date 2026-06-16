@@ -29,6 +29,7 @@ param(
     [Parameter(Mandatory)][string]$PromptFile,
     [string]$Model        = "",
     [string]$SystemPrompt = "",
+    [double]$MaxBudgetUsd = 0,
     [string]$Tag          = "claude"
 )
 $ErrorActionPreference = "Continue"  # PS 5.1: native stderr must not terminate.
@@ -49,9 +50,14 @@ $errFile  = Join-Path $logDir "$Tag-$stamp.err.log"
 # ("not a valid Win32 application"). The call operator + pipe is shim-compatible.
 # No tools needed for a text review, so -p returns directly. stdout -> variable
 # (clean UTF-8, no file-encoding step); stderr -> $errFile.
-$claudeArgs = @("-p", "--output-format", "json")
-if ($Model)        { $claudeArgs += @("--model", $Model) }
-if ($SystemPrompt) { $claudeArgs += @("--append-system-prompt", $SystemPrompt) }
+# --exclude-dynamic-system-prompt-sections: moves per-machine sections (cwd/env/memory paths) into
+# the first user message so the ~100k system prefix becomes cache-shareable ACROSS worktrees (Claude's
+# cache is per-directory; our worktree isolation defeats it by default). Quality-neutral: the cwd
+# already travels inside our prompts. Verified present in this claude build.
+$claudeArgs = @("-p", "--output-format", "json", "--exclude-dynamic-system-prompt-sections")
+if ($Model)              { $claudeArgs += @("--model", $Model) }
+if ($SystemPrompt)       { $claudeArgs += @("--append-system-prompt", $SystemPrompt) }
+if ($MaxBudgetUsd -gt 0) { $claudeArgs += @("--max-budget-usd", "$MaxBudgetUsd") }  # native per-call cap
 
 $promptText = Get-Content $PromptFile -Raw
 $out  = $promptText | & claude @claudeArgs 2>$errFile
@@ -81,11 +87,21 @@ if ($json) {
     if ($json.PSObject.Properties['is_error'])   { $isError   = [bool]$json.is_error }
     if ($json.PSObject.Properties['session_id']) { $sessionId = $json.session_id }
 }
+# Cost telemetry: capture the per-call spend and append one line to ledger\SPEND.jsonl -- the
+# deterministic basis for a budget guard (and to measure that the cache flag is actually saving).
+$cost = $null
+if ($json -and $json.PSObject.Properties['total_cost_usd']) { $cost = $json.total_cost_usd }
+if ($null -ne $cost) {
+    $ledgerDir = Join-Path $repoRoot "ledger"; New-Item -ItemType Directory -Force -Path $ledgerDir | Out-Null
+    ([PSCustomObject]@{ stamp=$stamp; tag=$Tag; model=$Model; cost_usd=$cost } | ConvertTo-Json -Compress) |
+        Add-Content -Path (Join-Path $ledgerDir "SPEND.jsonl") -Encoding utf8
+}
 
 [PSCustomObject]@{
     ExitCode  = $exit
     IsError   = $isError
     SessionId = $sessionId
+    Cost      = $cost
     Stdout    = $stdout
     Json      = $json
     Text      = $text

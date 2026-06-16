@@ -37,6 +37,7 @@ if ($K -lt 1) { $K = 1 }
 
 $runs   = New-Object System.Collections.ArrayList
 $passes = 0
+$earlyStopped = $false
 for ($i = 1; $i -le $K; $i++) {
     Push-Location $Cwd
     $code = $null
@@ -47,6 +48,10 @@ for ($i = 1; $i -le $K; $i++) {
     $ok = ($code -eq 0)
     if ($ok) { $passes++ }
     [void]$runs.Add([PSCustomObject]@{ run = $i; exit = $code; pass = $ok })
+    # Early-stop (mathematically LOSSLESS): under the strict pass^k gate (Threshold>=1) a single
+    # red already forces pass_pow_k=0 -- no remaining run can change the verdict. Saves up to
+    # (K-1)/K verify runs on every failing build; the merge decision is bit-identical.
+    if (-not $ok -and $Threshold -ge 1.0) { $earlyStopped = $true; break }
 }
 
 $rate      = [math]::Round($passes / $K, 4)
@@ -63,7 +68,9 @@ $result = [PSCustomObject]@{
     pass_pow_k = $passPowK
     threshold  = $Threshold
     score_ok   = $scoreOk
-    runs       = $runs
+    runs          = $runs
+    runs_executed = $runs.Count
+    early_stopped = $earlyStopped
     stamp      = (Get-Date -Format "o")
 }
 
