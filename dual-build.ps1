@@ -127,7 +127,11 @@ git branch -D $Branch 2>$null | Out-Null
 git worktree add -b $Branch $wtPath HEAD 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "worktree add fehlgeschlagen ($Branch von HEAD)." }
 
-& grok @grokArgs *>&1 | Tee-Object -FilePath $logFile
+# Bekanntes Rauschen herausfiltern: ein von Claude geerbter, NICHT eingeloggter HuggingFace-MCP
+# spammt beim Start Connect-Fehler (Grok arbeitet trotzdem). Lassen das Log/die Pane sauber;
+# echte Fehler (alles ausser diesem Auth/Transport-Spam) bleiben sichtbar.
+$noise = 'Auth\(AuthorizationRequired\)|Transport channel closed|huggingface\.co/\.well-known|www_authenticate_header|AuthRequired\('
+& grok @grokArgs *>&1 | Where-Object { "$_" -notmatch $noise } | Tee-Object -FilePath $logFile
 $grokExit = $LASTEXITCODE
 
 # --- Phase 3: Handoff to Claude (Assess + Fortify) -------------------------
