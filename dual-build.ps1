@@ -83,10 +83,14 @@ $planText
 "@
 Set-Content -Path $promptFile -Value $instruction -Encoding utf8
 
-# --- Phase 2: Grok invocation ----------------------------------------------
+# --- Phase 2: isolierten worktree SELBST anlegen + Grok via --cwd ----------
+# WICHTIG: grok --worktree greift im Headless-Modus NICHT (verifiziert) -> Grok baut sonst
+# im Main-Tree. Wir legen den worktree selbst an und schicken Grok mit --cwd hinein.
+$wtPath = Join-Path (Split-Path -Parent (Get-Location).Path) ("wt-" + ($Branch -replace '[\\/:]', '-'))
+
 $grokArgs = @(
+    "--cwd", $wtPath,
     "--prompt-file", $promptFile,
-    "--worktree", $Branch,
     "--output-format", "json",
     "--always-approve",
     "--max-turns", "$MaxTurns"
@@ -96,36 +100,36 @@ if ($Model)          { $grokArgs += @("--model", $Model) }
 
 Write-Host "=== Dual-Agent / Render (Grok) ===" -ForegroundColor Cyan
 Write-Host "Contract : $Plan"
-Write-Host "Worktree : $Branch"
+Write-Host "Branch   : $Branch  (worktree: $wtPath)"
 Write-Host "Variants : $Variants"
 Write-Host "Log      : $logFile"
 Write-Host "Aufruf   : grok $($grokArgs -join ' ')"
 
 if ($DryRun) { Write-Host "DryRun - kein Aufruf." -ForegroundColor Yellow; exit 0 }
 
+# frischen worktree anlegen (alten Branch/worktree gleichen Namens vorher raeumen)
+git worktree remove --force $wtPath 2>$null | Out-Null
+git branch -D $Branch 2>$null | Out-Null
+git worktree add -b $Branch $wtPath $Into 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) { Fail "worktree add fehlgeschlagen ($Branch von $Into)." }
+
 & grok @grokArgs *>&1 | Tee-Object -FilePath $logFile
 $grokExit = $LASTEXITCODE
 
 # --- Phase 3: Handoff to Claude (Assess + Fortify) -------------------------
 Write-Host "`n=== Render fertig (grok exit=$grokExit) ===" -ForegroundColor Cyan
-$wt = (git worktree list) -match [regex]::Escape($Branch) | Select-Object -First 1
-if ($wt) {
-    $wtPath = ($wt -split '\s+')[0]
-    Write-Host "Worktree-Pfad: $wtPath"
-    # POC als Commit sichern: das Merge-Gate merged Branch-Commits, nicht nur working-tree-Aenderungen.
-    git -C $wtPath add -A 2>$null | Out-Null
-    if (git -C $wtPath status --porcelain) {
-        git -C $wtPath commit -q -m "poc: grok build $stamp" 2>$null | Out-Null
-        Write-Host "Uncommittete POC-Aenderungen auf $Branch committet."
-    }
-    Write-Host "`nDiff-Stat (POC vs ${Into}):"
-    git -C $wtPath diff --stat $Into 2>$null
-    Write-Host "`nNAECHSTE SCHRITTE fuer Claude (CRAFT A+F):" -ForegroundColor Green
-    Write-Host "  1. Review als untrusted code: git -C `"$wtPath`" diff HEAD"
-    Write-Host "  2. Gegen PLAN.md pruefen (Drift / erfundene APIs / Error-Handling)."
-    Write-Host "  3. Haerten: Tests + Doku + Security. Merge nur bei gruenen Akzeptanzkriterien."
-} else {
-    Write-Host "Worktree '$Branch' nicht gefunden - Log pruefen: $logFile" -ForegroundColor Yellow
+Write-Host "Worktree-Pfad: $wtPath"
+# POC als Commit sichern: das Merge-Gate merged Branch-Commits, nicht nur working-tree-Aenderungen.
+git -C $wtPath add -A 2>$null | Out-Null
+if (git -C $wtPath status --porcelain) {
+    git -C $wtPath commit -q -m "poc: grok build $stamp" 2>$null | Out-Null
+    Write-Host "Uncommittete POC-Aenderungen auf $Branch committet."
 }
+Write-Host "`nDiff-Stat (POC vs ${Into}):"
+git -C $wtPath diff --stat $Into 2>$null
+Write-Host "`nNAECHSTE SCHRITTE fuer Claude (CRAFT A+F):" -ForegroundColor Green
+Write-Host "  1. Review als untrusted code: git -C `"$wtPath`" diff $Into"
+Write-Host "  2. Gegen PLAN.md pruefen (Drift / erfundene APIs / Error-Handling)."
+Write-Host "  3. Haerten + Merge: dual-merge.ps1 -From $Branch -Into $Into -Verify `"<test>`""
 
 if ($grokExit -ne 0) { Write-Host "Hinweis: grok exit != 0 (Refusal/Tool-Fehler?) - Log lesen." -ForegroundColor Yellow }
