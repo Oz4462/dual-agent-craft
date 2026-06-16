@@ -27,6 +27,11 @@
 - **Shared MCP verdrahtet (`.mcp.json`, keyless):** playwright (`npx @playwright/mcp`) + fetch
   (`uvx mcp-server-fetch`). Grok liest es (`grok inspect` -> `source: mcpJson`), beide Server starten
   real. Nutzung braucht Grok-Projekt-Trust + CC-`.mcp.json`-Approval (Discovery != Ausfuehrung).
+- **`--best-of-n 3` real bewiesen:** Grok fuhr ein 3-Kandidaten-Turnier (isolierte `bon/candidate-*`
+  Worktrees, je anderer Algo), waehlte Gewinner per Vergleichstabelle, landete ihn auf `feat/poc`;
+  eigene Temp-Worktrees selbst aufgeraeumt (verifiziert).
+- **Split-Screen-Cockpit:** `dual-view.ps1` (Windows Terminal, links Claude / rechts Grok-Live-Log
+  via `watch-grok.ps1`, das `.dual-agent/logs/grok-*.log` live tailt). `wt` vorhanden, tmux nicht.
 
 ## Protokoll (Kurz)
 CRAFT-Loop: Contract -> Render(Grok) -> Assess -> Fortify -> Test. Regeln in `PROTOCOL.md`,

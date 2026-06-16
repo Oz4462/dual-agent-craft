@@ -65,6 +65,19 @@ beide Server-Befehle starten real. Prereqs: `node`/`npx` + `uv`/`uvx` im PATH (E
   erst nach Projekt-Trust (einmal `grok` im Ordner starten + bestaetigen).
 - **Claude Code:** fragt beim naechsten Start die Freigabe der `.mcp.json`-Server ab (Security-Approval).
 
+## Split-Screen-Cockpit (beide live sehen)
+
+`dual-view.ps1` oeffnet Windows Terminal mit zwei Panes nebeneinander:
+- **links:** Claude Code (du arbeitest mit Claude/dem Architect).
+- **rechts:** Groks Live-Build-Log (`watch-grok.ps1`) — du siehst Grok bauen, sobald Claude
+  `dual-build.ps1` ausloest. `watch-grok.ps1` pollt `.dual-agent/logs/grok-*.log` und
+  wechselt automatisch aufs neueste.
+
+`.\dual-view.ps1`        # links Claude, rechts Grok-Live-Log
+`.\dual-view.ps1 -Grok`  # rechts stattdessen eine interaktive Grok-Session
+
+Voraussetzung: Windows Terminal (`wt`) sowie `claude`/`grok` im PATH.
+
 ## Troubleshooting
 
 - **Error-Spam `AuthorizationRequired ... huggingface.co/.../mcp`:** ein kaputter MCP-Server
