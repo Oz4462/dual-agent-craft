@@ -68,4 +68,14 @@ zeigt: einmal `grok login` ausführen. Ein `xAI-API-Key` ist **nicht** nötig.
   liesse sich das nur per Edit an der globalen Config (hier bewusst nicht angefasst).
 - `--always-approve` lässt Grok im worktree autonom Tools ausführen. Akzeptabel, weil isoliert;
   für mehr Härte `--sandbox <profile>` ergänzen.
-- `--best-of-n` + `--worktree` + `--prompt-file` zusammen: beim **ersten echten Lauf** verifizieren.
+- **Erster echter Render-Lauf** (`dual-build.ps1` ruft Grok): Pfad-/Arg-Assembly + POC-Auto-Commit
+  sind getestet, aber Groks Verhalten unter `--worktree`+`--best-of-n` (committet es selbst? Anzahl
+  Varianten-Commits?) erst am echten Lauf bestaetigen.
+- **git-Identitaet noetig:** `dual-merge` + POC-Auto-Commit machen Commits. Ohne globale Identitaet
+  vorher `git config user.name/.email` setzen (in diesem Workspace lokal bereits gesetzt).
+- **`feat/poc`-Wiederverwendung:** existiert Branch/worktree schon, schlaegt `--worktree feat/poc`
+  fehl -> vorher `git worktree remove` + Branch loeschen, oder anderen `-Branch` waehlen.
+- **Verify im frischen worktree:** laeuft in einem detached worktree ohne `node_modules`/venv/Build-
+  Artefakte -> der Verify-Befehl muss self-contained sein (ggf. Install einschliessen).
+- **Merge-Gate** wechselt dich nach Erfolg auf `$Into` (main); ggf. danach Branch zurueckwechseln.
+- **Worktree-Pfade mit Leerzeichen** werden nicht robust geparst (dieser Workspace-Pfad: ok).

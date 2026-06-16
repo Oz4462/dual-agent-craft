@@ -36,6 +36,7 @@ param(
     [string]$Plan     = ".\PLAN.md",
     [int]   $Variants = 3,
     [string]$Branch   = "feat/poc",
+    [string]$Into     = "main",
     [string]$Model    = "",
     [int]   $MaxTurns = 40,
     [switch]$DryRun
@@ -64,9 +65,12 @@ if ($dirty) { Fail "$Plan ist uncommitted. Erst committen, dann bauen." }
 # --- Phase 1: Composed prompt ----------------------------------------------
 $tmpDir = ".dual-agent\tmp"; $logDir = ".dual-agent\logs"
 New-Item -ItemType Directory -Force -Path $tmpDir, $logDir | Out-Null
+# Absolute Pfade: Grok wechselt mit --worktree das cwd -> ein relativer --prompt-file wuerde brechen.
+$tmpAbs = (Resolve-Path $tmpDir).Path
+$logAbs = (Resolve-Path $logDir).Path
 $stamp     = Get-Date -Format "yyyyMMdd-HHmmss"
-$promptFile = Join-Path $tmpDir "prompt-$stamp.txt"
-$logFile    = Join-Path $logDir "grok-$stamp.log"
+$promptFile = Join-Path $tmpAbs "prompt-$stamp.txt"
+$logFile    = Join-Path $logAbs "grok-$stamp.log"
 
 $instruction = @"
 You are the BUILDER in a dual-agent workflow. Build a working POC that satisfies the
@@ -108,8 +112,14 @@ $wt = (git worktree list) -match [regex]::Escape($Branch) | Select-Object -First
 if ($wt) {
     $wtPath = ($wt -split '\s+')[0]
     Write-Host "Worktree-Pfad: $wtPath"
-    Write-Host "`nDiff-Stat (POC vs HEAD):"
-    git -C $wtPath diff --stat HEAD 2>$null
+    # POC als Commit sichern: das Merge-Gate merged Branch-Commits, nicht nur working-tree-Aenderungen.
+    git -C $wtPath add -A 2>$null | Out-Null
+    if (git -C $wtPath status --porcelain) {
+        git -C $wtPath commit -q -m "poc: grok build $stamp" 2>$null | Out-Null
+        Write-Host "Uncommittete POC-Aenderungen auf $Branch committet."
+    }
+    Write-Host "`nDiff-Stat (POC vs ${Into}):"
+    git -C $wtPath diff --stat $Into 2>$null
     Write-Host "`nNAECHSTE SCHRITTE fuer Claude (CRAFT A+F):" -ForegroundColor Green
     Write-Host "  1. Review als untrusted code: git -C `"$wtPath`" diff HEAD"
     Write-Host "  2. Gegen PLAN.md pruefen (Drift / erfundene APIs / Error-Handling)."
