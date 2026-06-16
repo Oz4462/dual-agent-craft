@@ -1,0 +1,3 @@
+Amnesic project marker. session_start.py + session_finalizer.py honor this:
+no session recap is injected, no last_session.md is written here.
+This workspace is stateless by design — no old/cross-project memory.

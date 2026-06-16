@@ -28,7 +28,9 @@ Merge nur via `dual-merge.ps1`, kein falsches "fertig", kein Alt-Kontext.
 - Erster echter **Render-Lauf** (Grok baut POC im worktree, `--best-of-n`+`--worktree`
   zusammen) noch nicht ausgefuehrt — beim ersten Feature verifizieren.
 
-## Kontaminations-Hinweis
-- Session-Hooks dumpen ggf. MCP-Tool-Schemas (inkl. `asya-state`) nach `./mcps/` und
-  `./.claude/last_session.md`. Beides ist in `.gitignore` -> kommt NIE ins Repo.
-  Falls auf Disk: loeschen, kein Bestandteil dieses Workspace.
+## Kontaminations-Hinweis (Root-Cause gefixt 2026-06-16)
+- `.no-recap`-Marker hier aktiv -> globale Hooks `session_start.py` (kein Recap injizieren)
+  + `session_finalizer.py` (kein `last_session.md` schreiben) ueberspringen dieses Projekt.
+  Verifiziert: amnesisch hier, normale Projekte unveraendert. Hook-Backups `.bak-20260616`.
+- `mcps/<server>/tools/*.json` = Harness-Tool-Search-Cache (KEIN Hook), per `.gitignore`
+  draussen. Falls auf Disk: harmlos, kein Bestandteil dieses Workspace.
