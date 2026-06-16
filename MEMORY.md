@@ -24,6 +24,10 @@
   ->Merge. Grok lieferte korrekten Code + unaufgefordert `SUGGESTIONS`. Default-Branch hier ist `main`
   (umbenannt von `master`).
 
+- **Shared MCP verdrahtet (`.mcp.json`, keyless):** playwright (`npx @playwright/mcp`) + fetch
+  (`uvx mcp-server-fetch`). Grok liest es (`grok inspect` -> `source: mcpJson`), beide Server starten
+  real. Nutzung braucht Grok-Projekt-Trust + CC-`.mcp.json`-Approval (Discovery != Ausfuehrung).
+
 ## Protokoll (Kurz)
 CRAFT-Loop: Contract -> Render(Grok) -> Assess -> Fortify -> Test. Regeln in `PROTOCOL.md`,
 Staffelstab in `HANDOFF.md`. Invarianten: ein Schreiber pro Datei-Raum, getrennte worktrees,

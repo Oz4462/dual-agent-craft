@@ -53,6 +53,18 @@ git add PLAN.md; git commit -m "contract: <feature>"
 Funktioniert über dein Grok-**Abo** (OAuth). Falls `grok -p` mal `AuthorizationRequired`
 zeigt: einmal `grok login` ausführen. Ein `xAI-API-Key` ist **nicht** nötig.
 
+## Gemeinsame MCP-Tools (Playwright + Fetch)
+
+`.mcp.json` definiert zwei Tools, die **beide** Agenten lesen — **kein API-Key noetig**:
+- **playwright** (`npx @playwright/mcp`): Browser steuern, Screenshots, UI-Smoke -> echte Akzeptanz-Evidenz im Verify-Schritt.
+- **fetch** (`uvx mcp-server-fetch`): URL -> Text, "research before code".
+
+Verifiziert: Grok entdeckt beide via `grok inspect` (`source: mcpJson`, exakter Pfad);
+beide Server-Befehle starten real. Prereqs: `node`/`npx` + `uv`/`uvx` im PATH (Erststart laedt Pakete einmalig).
+- **Grok-Trust:** `grok inspect` zeigt `projectTrusted:false` -> Grok *entdeckt* die Server, *laedt* sie
+  erst nach Projekt-Trust (einmal `grok` im Ordner starten + bestaetigen).
+- **Claude Code:** fragt beim naechsten Start die Freigabe der `.mcp.json`-Server ab (Security-Approval).
+
 ## Troubleshooting
 
 - **Error-Spam `AuthorizationRequired ... huggingface.co/.../mcp`:** ein kaputter MCP-Server
