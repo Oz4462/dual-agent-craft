@@ -11,6 +11,9 @@
 .PARAMETER From    Quell-Branch (Default feat/harden)
 .PARAMETER Into    Ziel-Branch (Default main)
 .PARAMETER Verify  Test-/Build-Befehl, der gruen sein muss (z.B. "pytest -q").
+.PARAMETER EvalK   Graded gate: Verify K-mal laufen, Merge nur bei pass^k (ALLE K gruen).
+                   Default 1 = altes binaeres Verhalten. K>=3 empfohlen (Flakiness-Detektor;
+                   tau-bench: "einmal gruen" ist stark ueberoptimistisch).
 .PARAMETER Force   Merge ohne Verify erlauben (nicht empfohlen).
 
 .EXAMPLE
@@ -21,6 +24,7 @@ param(
     [string]$From   = "feat/harden",
     [string]$Into   = "main",
     [string]$Verify = "",
+    [int]   $EvalK  = 1,
     [switch]$Force
 )
 $ErrorActionPreference = "Continue"  # PS 5.1: unter "Stop" terminiert nativer git-stderr faelschlich
@@ -56,15 +60,30 @@ if ($overlap) {
 if ($Verify) {
     $tmp = Join-Path $env:TEMP ("dualgate-" + (Get-Date -Format "HHmmss"))
     git worktree add --detach $tmp $From 2>$null | Out-Null; GitFails "worktree add fehlgeschlagen."
-    Push-Location $tmp
-    Write-Host "`nVerify im Kandidaten: $Verify"
     $verifyOk = $true
-    try { Invoke-Expression $Verify; if ($LASTEXITCODE -ne 0) { $verifyOk = $false } }
-    catch { $verifyOk = $false; Write-Host $_.Exception.Message -ForegroundColor Red }
-    Pop-Location
+    if ($EvalK -gt 1) {
+        # Graded gate (pass^k): ALLE K Laeufe muessen gruen sein. "Einmal gruen" ist
+        # nicht "fertig" -- faengt flaky Builds, die ein binaeres Gate durchliesse.
+        Write-Host "`nGraded Verify (pass^k, k=$EvalK) im Kandidaten: $Verify"
+        $eval = & "$PSScriptRoot\lib\eval-harness.ps1" -Verify $Verify -K $EvalK -Cwd $tmp `
+                    -OutFile (Join-Path $PSScriptRoot "ledger\EVAL.json")
+        if (-not $eval -or $eval.pass_pow_k -ne 1) {
+            $verifyOk = $false
+            $r = if ($eval) { "$($eval.passes)/$($eval.k)" } else { "n/a" }
+            Write-Host ("pass^k ROT ({0} gruen) - flaky/rot, kein Merge (Invariante 4)." -f $r) -ForegroundColor Red
+        } else {
+            Ok ("pass^k GRUEN ({0}/{1}) - konsistent, kein Flake." -f $eval.passes, $eval.k)
+        }
+    } else {
+        Push-Location $tmp
+        Write-Host "`nVerify im Kandidaten: $Verify"
+        try { Invoke-Expression $Verify; if ($LASTEXITCODE -ne 0) { $verifyOk = $false } }
+        catch { $verifyOk = $false; Write-Host $_.Exception.Message -ForegroundColor Red }
+        Pop-Location
+    }
     git worktree remove --force $tmp *> $null
     if (-not $verifyOk) { Fail "Verify ROT - kein Merge (Invariante 4)." }
-    Ok "Verify GRUEN."
+    Ok "Verify-Gate gruen."
 } elseif (-not $Force) {
     Fail "Kein -Verify angegeben. Mit -Force ueberstimmen (nicht empfohlen)."
 } else {

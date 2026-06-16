@@ -84,22 +84,17 @@ Set-Content -Path $promptFile -Value $instruction -Encoding utf8
 # im Main-Tree. Wir legen den worktree selbst an und schicken Grok mit --cwd hinein.
 $wtPath = Join-Path (Split-Path -Parent (Get-Location).Path) ("wt-" + ($Branch -replace '[\\/:]', '-'))
 
-$grokArgs = @(
-    "--cwd", $wtPath,
-    "--prompt-file", $promptFile,
-    "--output-format", "json",
-    "--always-approve",
-    "--max-turns", "$MaxTurns"
-)
-if ($Variants -gt 1) { $grokArgs += @("--best-of-n", "$Variants") }
-if ($Model)          { $grokArgs += @("--model", $Model) }
+# Render laeuft jetzt ueber lib\grok-call.ps1: es baut die grok-Args UND trennt
+# stdout(json) von stderr(noise) auf OS-Ebene. Der alte Inline-Filter (*>&1 |
+# Where-Object) scheiterte still an PS-5.1-ErrorRecords -> Auth-Spam landete im
+# (UTF-16-)Log. grok-call schreibt grok-*.out.json + grok-*.err.log getrennt.
 
 Write-Host "=== Dual-Agent / Render (Grok) ===" -ForegroundColor Cyan
 Write-Host "Contract : $Plan"
 Write-Host "Branch   : $Branch  (worktree: $wtPath)"
 Write-Host "Variants : $Variants"
-Write-Host "Log      : $logFile"
-Write-Host "Aufruf   : grok $($grokArgs -join ' ')"
+Write-Host "Log-Dir  : $logDir  (grok-*.out.json + grok-*.err.log getrennt)"
+Write-Host "Render   : lib\grok-call.ps1 -BestOfN $Variants  (stdout/stderr OS-getrennt)"
 
 if ($DryRun) { Write-Host "DryRun - kein Aufruf." -ForegroundColor Yellow; exit 0 }
 
@@ -127,12 +122,21 @@ git branch -D $Branch 2>$null | Out-Null
 git worktree add -b $Branch $wtPath HEAD 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "worktree add fehlgeschlagen ($Branch von HEAD)." }
 
-# Bekanntes Rauschen herausfiltern: ein von Claude geerbter, NICHT eingeloggter HuggingFace-MCP
-# spammt beim Start Connect-Fehler (Grok arbeitet trotzdem). Lassen das Log/die Pane sauber;
-# echte Fehler (alles ausser diesem Auth/Transport-Spam) bleiben sichtbar.
-$noise = 'Auth\(AuthorizationRequired\)|Transport channel closed|huggingface\.co/\.well-known|www_authenticate_header|AuthRequired\('
-& grok @grokArgs *>&1 | Where-Object { "$_" -notmatch $noise } | Tee-Object -FilePath $logFile
-$grokExit = $LASTEXITCODE
+# Render: stdout(json)/stderr(noise) werden in grok-call.ps1 OS-seitig getrennt
+# (Start-Process-Redirects). Kein fragiler Stream-Merge, kein UTF-16-Log mehr.
+$render = & "$PSScriptRoot\lib\grok-call.ps1" -PromptFile $promptFile -Cwd $wtPath `
+    -MaxTurns $MaxTurns -BestOfN $Variants -Model $Model -AlwaysApprove -Tag "grok"
+if ($render) {
+    $grokExit = $render.ExitCode
+    Write-Host "`nGrok-Resultat (stdout, noise-frei):" -ForegroundColor DarkCyan
+    Write-Host ("$($render.Text)".Trim())
+    Write-Host "`nVoll-Log: $($render.StdoutLog)"
+    Write-Host "stderr/noise (separat): $($render.StderrLog)"
+    if ($render.NoiseInResult) { Write-Host "WARN: Noise im Resultat erkannt (unerwartet -> grok-call pruefen)." -ForegroundColor Yellow }
+} else {
+    $grokExit = 1
+    Write-Host "BLOCKED: grok-call.ps1 lieferte kein Resultat (Praecondition?)." -ForegroundColor Red
+}
 
 # --- Phase 3: Handoff to Claude (Assess + Fortify) -------------------------
 Write-Host "`n=== Render fertig (grok exit=$grokExit) ===" -ForegroundColor Cyan
