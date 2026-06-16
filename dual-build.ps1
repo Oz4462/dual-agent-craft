@@ -41,7 +41,7 @@ param(
     [switch]$DryRun
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # PS 5.1: unter "Stop" terminiert nativer git-stderr faelschlich
 
 function Fail($msg) { Write-Host "BLOCKED: $msg" -ForegroundColor Red; exit 1 }
 
@@ -49,8 +49,8 @@ function Fail($msg) { Write-Host "BLOCKED: $msg" -ForegroundColor Red; exit 1 }
 if (-not (Get-Command grok -ErrorAction SilentlyContinue)) { Fail "grok CLI nicht im PATH." }
 if (-not (Get-Command git  -ErrorAction SilentlyContinue)) { Fail "git nicht im PATH." }
 
-git rev-parse --is-inside-work-tree *> $null
-if (-not $?) { Fail "Kein git-Repo. Erst 'git init' + ersten Commit." }
+git rev-parse --is-inside-work-tree 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) { Fail "Kein git-Repo. Erst 'git init' + ersten Commit." }
 
 if (-not (Test-Path $Plan)) { Fail "Contract fehlt: $Plan (Claude muss PLAN.md zuerst schreiben)." }
 $planText = (Get-Content $Plan -Raw).Trim()

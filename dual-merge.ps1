@@ -23,14 +23,16 @@ param(
     [string]$Verify = "",
     [switch]$Force
 )
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # PS 5.1: unter "Stop" terminiert nativer git-stderr faelschlich
 function Fail($m){ Write-Host "BLOCKED: $m" -ForegroundColor Red; exit 1 }
 function Ok($m){ Write-Host $m -ForegroundColor Green }
+# PS 5.1: native git schreibt nach stderr -> $? wird unzuverlaessig. Immer $LASTEXITCODE pruefen.
+function GitFails($m){ if ($LASTEXITCODE -ne 0) { Fail $m } }
 
 # --- Preconditions ---------------------------------------------------------
-git rev-parse --is-inside-work-tree *> $null; if (-not $?) { Fail "Kein git-Repo." }
-git rev-parse --verify $From *> $null; if (-not $?) { Fail "Branch fehlt: $From" }
-git rev-parse --verify $Into *> $null; if (-not $?) { Fail "Branch fehlt: $Into" }
+git rev-parse --is-inside-work-tree 2>$null | Out-Null; GitFails "Kein git-Repo."
+git rev-parse --verify $From 2>$null | Out-Null; GitFails "Branch fehlt: $From"
+git rev-parse --verify $Into 2>$null | Out-Null; GitFails "Branch fehlt: $Into"
 if (git status --porcelain) { Fail "Working tree nicht clean - erst committen/stashen." }
 
 # --- Ownership / Overlap-Report (Transparenz vor dem Merge) ----------------
@@ -53,7 +55,7 @@ if ($overlap) {
 # --- Verify-Gate (im temp-worktree des Kandidaten) -------------------------
 if ($Verify) {
     $tmp = Join-Path $env:TEMP ("dualgate-" + (Get-Date -Format "HHmmss"))
-    git worktree add --detach $tmp $From *> $null; if (-not $?) { Fail "worktree add fehlgeschlagen." }
+    git worktree add --detach $tmp $From 2>$null | Out-Null; GitFails "worktree add fehlgeschlagen."
     Push-Location $tmp
     Write-Host "`nVerify im Kandidaten: $Verify"
     $verifyOk = $true
@@ -70,7 +72,7 @@ if ($Verify) {
 }
 
 # --- Merge (Konflikt = Abbruch, nie ueberschreiben) ------------------------
-git checkout $Into *> $null
+git checkout $Into 2>$null | Out-Null
 git merge --no-ff --no-edit $From
 if ($LASTEXITCODE -ne 0) {
     git merge --abort
