@@ -1,6 +1,7 @@
 # Dual-agent harness artifacts
 .dual-agent/logs/
 .dual-agent/tmp/
+ledger/
 *.tmp
 
 # Never commit secrets

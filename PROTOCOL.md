@@ -15,6 +15,17 @@
 4. **Kein falsches "fertig".** Merge in `main` nur, wenn die Akzeptanz-Kriterien (Verify-Command)
    grün sind. Rot = Block, kein Merge.
 5. **Kein Alt-Kontext.** Jeder Build kennt nur seine `PLAN.md`. Kein Memory, keine Secrets.
+6. **Der Eval entscheidet, nicht Konsens.** Merge-Freigabe und Streitschlichtung kommen vom
+   objektiven Eval (`pass^k` — alle K Läufe grün), nie von gegenseitiger Zustimmung. Cross-Review
+   ist auf **eine** Rebuttal-Runde gedeckelt (kein Rhetorik-Loop), danach entscheidet der Test.
+   (Research-Grund: „debate-until-consensus" erzeugt sykophantischen Falsch-Konsens; der Eval ist
+   der einzige Schiedsrichter, den kein Agent per Argument überschreiben kann.)
+7. **Grok editiert NIE Tests/Verify.** In `feat/poc` schreibt Grok nur Implementierung (`src/` o.ä.),
+   niemals Test-/Verify-Dateien. Sonst gamed der Builder das Gate (Tests lockern statt Code fixen).
+   Tests sind für Grok untrusted-input; Claude pinnt `verify/acceptance` vor dem Build.
+8. **Subjektives Patt → Mikro-Probe, nicht Endlos-Debatte.** Defended + nicht-eval-entscheidbare
+   Issues löst `dual-tiebreak.ps1` (Wahl c): Grok baut BEIDE Varianten isoliert, der Eval misst den
+   Sieger. Der gemessene Gewinner zählt, keine Meinung, kein Dauermediator-Mensch.
 
 ## Rollen-Aufteilung (wer macht was)
 
@@ -53,3 +64,21 @@ Niemals "der Letzte gewinnt".
 4. Gate :   dual-merge.ps1 -Verify "<test-cmd>"   (feat/harden -> main bei grün)
 5. Beide:   SUGGESTIONS in HANDOFF.md -> naechster PLAN.md
 ```
+
+## Bounded Cross-Review + Eval-Schiedsrichter (v2, 2026-06-17)
+
+CRAFT-Schritt **A** ist jetzt eine **bounded cross-review** (`dual-review.ps1`), KEIN
+„debate-until-consensus". Zwei verschiedene Vendoren (Claude != Grok) brechen korrelierte
+Fehler + self-preference bias; der **Eval** ist die Wahrheit, nicht die Einigung:
+
+    A1 Assess    Claude reviewt Groks Diff als untrusted code  -> issues[]   (JSON)
+    A2 Rebuttal  Grok antwortet EINMAL: concede | defend+Beleg -> rebuttals[] (JSON)  [HARTER CAP]
+    A3 Klassif.  conceded            -> Grok fixt im naechsten Build
+                 defended+decidable  -> der Eval (pass^k) entscheidet, kein weiterer Streit
+                 defended+subjektiv  -> Tie -> dual-tiebreak.ps1 (Mikro-Probe + Eval, Wahl c)
+    T  Gate      dual-merge.ps1 -EvalK K   (Merge nur bei pass^k == 1)
+
+Bausteine (verifiziert 2026-06-17): `lib\grok-call.ps1` + `lib\claude-call.ps1` (saubere
+headless-Hüllen, stdout/stderr OS-getrennt), `lib\eval-harness.ps1` (pass@k / pass^k),
+`dual-review.ps1` (bounded review), `dual-merge.ps1 -EvalK` (graded Gate). Offen: `dual-tiebreak.ps1`
+(Wahl c) + Security-Pass (`--sandbox`, Hook-Matcher `Bash|PowerShell`) + erster echter End-to-End-Build.
