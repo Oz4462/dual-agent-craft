@@ -41,6 +41,11 @@ param(
     [string]$Sandbox      = "",
     [switch]$AlwaysApprove,
     [switch]$Check,
+    [string[]]$Deny       = @(),   # least-privilege: deny rules override --always-approve
+    [string]$Tools        = "",    # built-in tool allowlist (comma-separated)
+    [string]$DisallowedTools = "",
+    [string]$PermissionMode  = "", # default|acceptEdits|auto|dontAsk|bypassPermissions|plan
+    [switch]$DryRun,
     [string]$Tag          = "grok"
 )
 $ErrorActionPreference = "Continue"  # PS 5.1: native stderr must not terminate.
@@ -58,11 +63,20 @@ $errFile  = Join-Path $logDir "$Tag-$stamp.err.log"
 
 # Build the argument string; quote every path because --cwd changes the working dir.
 $a = "--prompt-file `"$PromptFile`" --cwd `"$Cwd`" --output-format json --max-turns $MaxTurns"
-if ($BestOfN -gt 1) { $a += " --best-of-n $BestOfN" }
-if ($AlwaysApprove) { $a += " --always-approve" }
-if ($Check)         { $a += " --check" }
-if ($Model)         { $a += " --model `"$Model`"" }
-if ($Sandbox)       { $a += " --sandbox `"$Sandbox`"" }
+if ($BestOfN -gt 1)   { $a += " --best-of-n $BestOfN" }
+if ($AlwaysApprove)   { $a += " --always-approve" }
+if ($Check)           { $a += " --check" }
+if ($Model)           { $a += " --model `"$Model`"" }
+if ($Sandbox)         { $a += " --sandbox `"$Sandbox`"" }
+if ($Tools)           { $a += " --tools `"$Tools`"" }
+if ($DisallowedTools) { $a += " --disallowed-tools `"$DisallowedTools`"" }
+if ($PermissionMode)  { $a += " --permission-mode $PermissionMode" }
+foreach ($d in $Deny) { $a += " --deny `"$d`"" }   # deny overrides approve -> destructive ops blocked
+
+if ($DryRun) {
+    Write-Host ("grok-call DryRun -- grok " + $a) -ForegroundColor Yellow
+    return [PSCustomObject]@{ ExitCode = 0; DryRun = $true; Args = $a }
+}
 
 # OS-level stream separation: result -> $outFile (raw UTF-8), noise -> $errFile.
 $proc = Start-Process -FilePath $grok.Source -ArgumentList $a `

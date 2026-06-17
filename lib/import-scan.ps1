@@ -33,6 +33,9 @@ param(
     [string[]]$AllowList  = @(),
     [ValidateSet("auto","python","npm")][string]$Ecosystem = "auto",
     [int]     $TimeoutSec = 12,
+    [switch]  $CheckProvenance,
+    [int]     $SuspectAgeDays = 30,
+    [switch]  $BlockSuspect,
     [string]  $OutFile    = ""
 )
 $ErrorActionPreference = "Continue"
@@ -91,24 +94,52 @@ function Test-Registry($pkg, $kind) {
     }
 }
 
-$invented = @(); $offContract = @(); $ok = @(); $unknown = @()
+# Slopsquat defense: a registered-but-YOUNG package is the 404-check's blind spot (squatters
+# register the hallucinated name -> returns 200). Returns age in days from the earliest release,
+# or $null on any error (never falsely flag).
+function Get-PackageAgeDays($pkg, $kind) {
+    try {
+        if ($kind -eq 'npm') {
+            $j = Invoke-RestMethod -Uri "https://registry.npmjs.org/$pkg" -TimeoutSec $TimeoutSec -ErrorAction Stop
+            if ($j.time -and $j.time.created) { return ((Get-Date) - [datetime]$j.time.created).TotalDays }
+        } else {
+            $j = Invoke-RestMethod -Uri "https://pypi.org/pypi/$pkg/json" -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $times = New-Object System.Collections.ArrayList
+            foreach ($rel in $j.releases.PSObject.Properties) {
+                foreach ($f in $rel.Value) { if ($f.upload_time) { [void]$times.Add([datetime]$f.upload_time) } }
+            }
+            if ($times.Count) { return ((Get-Date) - ($times | Sort-Object | Select-Object -First 1)).TotalDays }
+        }
+    } catch { }
+    return $null
+}
+
+$invented = @(); $offContract = @(); $ok = @(); $unknown = @(); $suspect = @()
 foreach ($p in $pkgs) {
     $kind = $kindOf[$p]
     $isStd = ($kind -eq 'python' -and $pyStd -contains $p) -or ($kind -eq 'npm' -and $nodeStd -contains $p)
     $inAllow = ($AllowList.Count -eq 0) -or ($AllowList -contains $p)
     if ($isStd) { $ok += [PSCustomObject]@{ pkg=$p; kind=$kind; why='stdlib' }; continue }
     $exists = Test-Registry $p $kind
-    if ($exists -eq $false)      { $invented    += [PSCustomObject]@{ pkg=$p; kind=$kind; why='registry-404' } }
-    elseif ($null -eq $exists)   { $unknown     += [PSCustomObject]@{ pkg=$p; kind=$kind; why='registry-unreachable' } }
-    elseif (-not $inAllow)       { $offContract += [PSCustomObject]@{ pkg=$p; kind=$kind; why='not-in-PLAN-allowlist' } }
-    else                         { $ok          += [PSCustomObject]@{ pkg=$p; kind=$kind; why='registry-ok+allowed' } }
+    if ($exists -eq $false)    { $invented    += [PSCustomObject]@{ pkg=$p; kind=$kind; why='registry-404' }; continue }
+    if ($null -eq $exists)     { $unknown     += [PSCustomObject]@{ pkg=$p; kind=$kind; why='registry-unreachable' }; continue }
+    if (-not $inAllow)         { $offContract += [PSCustomObject]@{ pkg=$p; kind=$kind; why='not-in-PLAN-allowlist' }; continue }
+    # exists + allowed: optional provenance/age check (slopsquat defense)
+    if ($CheckProvenance) {
+        $age = Get-PackageAgeDays $p $kind
+        if ($null -ne $age -and $age -lt $SuspectAgeDays) {
+            $suspect += [PSCustomObject]@{ pkg=$p; kind=$kind; age_days=[math]::Round($age,1); why="registered only $([math]::Round($age))d ago (slopsquat-suspect)" }
+            continue
+        }
+    }
+    $ok += [PSCustomObject]@{ pkg=$p; kind=$kind; why='registry-ok+allowed' }
 }
 
-$blocked = ($invented.Count -gt 0) -or ($offContract.Count -gt 0)
+$blocked = ($invented.Count -gt 0) -or ($offContract.Count -gt 0) -or ($BlockSuspect -and $suspect.Count -gt 0)
 $result = [PSCustomObject]@{
     base=$Base; poc=$PocBranch; scanned=$pkgs.Count
-    invented=$invented; off_contract=$offContract; unknown=$unknown; ok=$ok
-    verdict = if ($blocked) { "BLOCK" } elseif ($unknown.Count) { "WARN-unreachable" } else { "PASS" }
+    invented=$invented; off_contract=$offContract; suspect=$suspect; unknown=$unknown; ok=$ok
+    verdict = if ($blocked) { "BLOCK" } elseif ($suspect.Count) { "WARN-slopsquat" } elseif ($unknown.Count) { "WARN-unreachable" } else { "PASS" }
     stamp=(Get-Date -Format "o")
 }
 if (-not $OutFile) {
@@ -118,9 +149,10 @@ if (-not $OutFile) {
 }
 $result | ConvertTo-Json -Depth 6 | Set-Content -Path $OutFile -Encoding utf8
 
-$col = if ($blocked) { "Red" } elseif ($unknown.Count) { "Yellow" } else { "Green" }
-Write-Host ("import-scan: {0} scanned | invented={1} off-contract={2} unknown={3} ok={4} -> {5}" -f `
-    $pkgs.Count, $invented.Count, $offContract.Count, $unknown.Count, $ok.Count, $result.verdict) -ForegroundColor $col
+$col = if ($blocked) { "Red" } elseif ($suspect.Count -or $unknown.Count) { "Yellow" } else { "Green" }
+Write-Host ("import-scan: {0} scanned | invented={1} off-contract={2} suspect={3} unknown={4} ok={5} -> {6}" -f `
+    $pkgs.Count, $invented.Count, $offContract.Count, $suspect.Count, $unknown.Count, $ok.Count, $result.verdict) -ForegroundColor $col
 foreach ($i in $invented)    { Write-Host ("  INVENTED:     {0} ({1})" -f $i.pkg,$i.kind) -ForegroundColor Red }
 foreach ($o in $offContract) { Write-Host ("  OFF-CONTRACT: {0} ({1})" -f $o.pkg,$o.kind) -ForegroundColor Red }
+foreach ($s in $suspect)     { Write-Host ("  SLOPSQUAT?:   {0} ({1}) {2}" -f $s.pkg,$s.kind,$s.why) -ForegroundColor Yellow }
 if ($blocked) { exit 2 } else { exit 0 }

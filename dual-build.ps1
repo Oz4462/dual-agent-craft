@@ -39,6 +39,8 @@ param(
     [string]$Into     = "main",
     [string]$Model    = "",
     [int]   $MaxTurns = 40,
+    [switch]$Adaptive,            # render N=1 first, escalate to -Variants only on failed acceptance
+    [string]$Verify   = "",       # cheap acceptance signal for adaptive escalation (e.g. "pytest -q")
     [switch]$DryRun
 )
 
@@ -124,18 +126,43 @@ if ($LASTEXITCODE -ne 0) { Fail "worktree add fehlgeschlagen ($Branch von HEAD).
 
 # Render: stdout(json)/stderr(noise) werden in grok-call.ps1 OS-seitig getrennt
 # (Start-Process-Redirects). Kein fragiler Stream-Merge, kein UTF-16-Log mehr.
-$render = & "$PSScriptRoot\lib\grok-call.ps1" -PromptFile $promptFile -Cwd $wtPath `
-    -MaxTurns $MaxTurns -BestOfN $Variants -Model $Model -AlwaysApprove -Tag "grok"
+# Least-privilege: --always-approve keeps headless autonomous, but --deny blocks destructive/
+# exfiltrative ops (deny overrides approve). Exact grok rule syntax confirmed on first live render.
+$denyRules = @('Bash(rm -rf *)', 'Bash(git push *)', 'Bash(curl *)', 'Bash(wget *)')
+$doRender = {
+    param($n)
+    & "$PSScriptRoot\lib\grok-call.ps1" -PromptFile $promptFile -Cwd $wtPath `
+        -MaxTurns $MaxTurns -BestOfN $n -Model $Model -AlwaysApprove -Deny $denyRules -Tag "grok"
+}
+# Adaptive: render the cheap N=1 first; escalate to full -Variants ONLY if it fails acceptance.
+# ~66% fewer Grok tokens on easy builds, equal quality (the eval still gates the merge).
+$effectiveN = if ($Adaptive -and $Variants -gt 1) { 1 } else { $Variants }
+Write-Host ("Render   : best-of-{0}{1}" -f $effectiveN, $(if ($Adaptive) { ' (adaptive: N=1 first)' } else { '' }))
+$render = & $doRender $effectiveN
+$grokExit = if ($render) { $render.ExitCode } else { 1 }
 if ($render) {
-    $grokExit = $render.ExitCode
     Write-Host "`nGrok-Resultat (stdout, noise-frei):" -ForegroundColor DarkCyan
     Write-Host ("$($render.Text)".Trim())
     Write-Host "`nVoll-Log: $($render.StdoutLog)"
     Write-Host "stderr/noise (separat): $($render.StderrLog)"
     if ($render.NoiseInResult) { Write-Host "WARN: Noise im Resultat erkannt (unerwartet -> grok-call pruefen)." -ForegroundColor Yellow }
 } else {
-    $grokExit = 1
     Write-Host "BLOCKED: grok-call.ps1 lieferte kein Resultat (Praecondition?)." -ForegroundColor Red
+}
+
+# Adaptive escalation: if the cheap N=1 build fails the acceptance signal, re-render with full N.
+if ($Adaptive -and $Variants -gt 1 -and $Verify -and $grokExit -eq 0) {
+    Push-Location $wtPath
+    $acceptOk = $true
+    try { Invoke-Expression $Verify *> $null; if ($LASTEXITCODE -ne 0) { $acceptOk = $false } } catch { $acceptOk = $false }
+    Pop-Location
+    if (-not $acceptOk) {
+        Write-Host ("Adaptive : N=1 failed acceptance ({0}) -> escalating to best-of-{1}" -f $Verify, $Variants) -ForegroundColor Yellow
+        $render = & $doRender $Variants
+        $grokExit = if ($render) { $render.ExitCode } else { 1 }
+    } else {
+        Write-Host ("Adaptive : N=1 passed acceptance -> saved {0} variants." -f ($Variants - 1)) -ForegroundColor Green
+    }
 }
 
 # --- Phase 3: Handoff to Claude (Assess + Fortify) -------------------------

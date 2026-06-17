@@ -116,6 +116,11 @@ if ($issues.Count -eq 0) {
 
 # --- Phase 3: REBUTTAL (Grok headless, exactly ONE round) ------------------
 $issuesJson = ($issues | ConvertTo-Json -Depth 6)
+# Token-saving: the rebuttal only needs the files the reviewer flagged, not the whole diff
+# (~50% fewer tokens; the builder only argues about flagged lines). Falls back to full diff.
+$issueFiles = @($issues | ForEach-Object { $_.file } | Where-Object { $_ -and "$_" -ne '' } | Select-Object -Unique)
+$rebuttalDiff = if ($issueFiles.Count -gt 0) { (git diff "$Base...$PocBranch" -- $issueFiles | Out-String).Trim() } else { $diff }
+if ([string]::IsNullOrWhiteSpace($rebuttalDiff)) { $rebuttalDiff = $diff }
 $rebuttalPrompt = @"
 You are the BUILDER. The REVIEWER raised the issues below about YOUR diff. For EACH issue,
 either "concede" (you will fix it), "defend" with a REAL citation, or "unsure". A "defend"
@@ -129,8 +134,8 @@ prose, no fences:
 === CONTRACT (PLAN.md) ===
 $planText
 
-=== YOUR DIFF ($Base...$PocBranch) ===
-$diff
+=== YOUR DIFF (flagged files only: $($issueFiles -join ', ')) ===
+$rebuttalDiff
 
 === REVIEWER ISSUES ===
 $issuesJson
