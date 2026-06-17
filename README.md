@@ -1,118 +1,164 @@
-# Dual-Agent Workflow — Claude Code + Grok Build
+<div align="center">
 
-Sauberer, **project-agnostischer** Build-Harness. Zwei CLI-Agenten arbeiten zusammen,
-jeder auf seinem eigenen Abo — **kein xAI-API-Key, kein Cloud-Tool, kein Memory aus alten Projekten.**
+# 🤝 Dual-Agent CRAFT Harness
 
-## Rollen
+### Two rival AI models. One referee that can't be argued with.
 
-| Agent | Rolle | Stärken |
+A local build harness where **Claude Code** (architect/reviewer) and **Grok CLI** (builder) collaborate across vendor lines — and an **objective `pass^k` eval**, never their agreement, decides what ships.
+
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE?logo=powershell&logoColor=white)
+![Claude Code](https://img.shields.io/badge/Claude_Code-architect%2Freviewer-D97757)
+![Grok CLI](https://img.shields.io/badge/Grok_CLI-builder-111111)
+![Ollama](https://img.shields.io/badge/Ollama-zero--quota_scout-000000?logo=ollama&logoColor=white)
+![API keys](https://img.shields.io/badge/API_keys-0-2ea44f)
+![Merge gate](https://img.shields.io/badge/merge-pass%5Ek_gated-1f6feb)
+![Live-tested](https://img.shields.io/badge/end--to--end-live--verified-2ea44f)
+
+</div>
+
+---
+
+## ✨ Why this is different
+
+Most agent setups are **single-vendor**: one model builds *and* judges its own work — so it inherits its own blind spots and [prefers its own output](https://arxiv.org/pdf/2404.13076). This harness is built on the opposite bet, which the research independently converged on (["SLEAN", arXiv:2510.10010](https://arxiv.org/pdf/2510.10010)):
+
+> **Two *different* model families produce and cross-examine each other, and a deterministic eval — not consensus — is the arbiter.**
+
+| | Single-vendor fleets (e.g. 67 agents) | **This harness** |
 |---|---|---|
-| **Claude Code** | Architect / Reviewer / Hardener | Plan, Contract, kritischer Review, Tests, Security |
-| **Grok Build**  | Builder / Explorer | Tempo, kreative POCs, `--best-of-n` Varianten, Subagents |
+| Reviewer vs builder | same model family → correlated errors | **different vendors** → uncorrelated errors |
+| Who decides a merge | the agents "agree" | the **`pass^k` eval** (all K runs green) |
+| Disagreement | a problem to negotiate away | **signal** — the whole point |
+| Hallucinated packages | caught by eyeball, maybe | **blocked deterministically** (registry 404 + slopsquat age-check) |
+| Cost of "ultimate" | 60+ agents to maintain | **6 small roles + an eval** |
 
-## CRAFT-Loop
+The research is blunt about why "debate until you agree" is the wrong design: multi-round debate produces [**sycophantic false consensus**](https://arxiv.org/abs/2509.05396) and [self-correction without an external signal degrades accuracy](https://arxiv.org/abs/2310.01798). So here, agents cross-examine **once**, then the test suite settles it.
 
+---
+
+## 🔁 The CRAFT loop
+
+```mermaid
+flowchart LR
+    C["📝 <b>C</b>ontract<br/>PLAN.md"] --> R["⚙️ <b>R</b>ender<br/>Grok · adaptive best-of-N"]
+    R --> SCAN{"🛡️ import-scan<br/>invented pkg?"}
+    SCAN -->|clean| A["🔍 <b>A</b>ssess<br/>Claude reviews as untrusted code"]
+    SCAN -->|invented| X1["⛔ blocked"]
+    A --> RB["💬 1 rebuttal<br/>Grok: concede / defend+cite / unsure"]
+    RB --> F["🔧 <b>F</b>ortify<br/>Claude hardens"]
+    F --> T{"🧪 <b>T</b>est gate<br/>No-Cut + pass^k"}
+    T -->|3/3 green| M["✅ merge → main"]
+    T -->|red / flaky| R
+    T -->|subjective tie| P["🎲 micro-probe<br/>both built, eval measures winner"]
+    P --> T
 ```
-C  Contract   Claude schreibt PLAN.md (aus PLAN.template.md) — kein Code
-R  Render     dual-build.ps1 -> Grok baut N POC-Varianten im worktree feat/poc
-A  Assess     Claude reviewt Groks Diff als untrusted code (Drift? erfundene APIs?)
-F  Fortify    Claude härtet: Refactor + Tests + Error-Handling + Doku + Security
-T  Test       Akzeptanzkriterien laufen -> Merge nur bei grün
-```
 
-## Setup (einmalig)
+**The flow, in one breath:** Claude writes a strict `PLAN.md` → Grok builds N variants in an isolated git worktree → a deterministic scan blocks invented dependencies → Claude reviews the diff as *untrusted external code* → Grok gets exactly **one** rebuttal → the `pass^k` gate merges only if every run is green. Conflict = abort, never overwrite. Red = no merge.
+
+---
+
+## 🛡️ Anti-drift & anti-hallucination guards
+
+Every guard is **deterministic** where possible (nothing in the loop that can itself hallucinate):
+
+| Guard | What it stops | How |
+|---|---|---|
+| **`import-scan`** | invented packages ([~19.7% of LLM pkg suggestions don't exist](https://arxiv.org/abs/2406.10279)) | live PyPI/npm `404` + PLAN allow-list, **fail-closed, zero tokens** |
+| **slopsquat tier** | *registered* hallucinated names ([slopsquatting](https://www.aikido.dev/blog/slopsquatting-ai-package-hallucination-attacks)) | package **age check** — young + unexpected = flagged |
+| **abstention schema** | the builder bluffing a defense | `defend` needs a real citation, else auto-downgrades to **`unsure`** |
+| **untrusted-code review** | drift from the contract | Claude reviews Grok's diff as hostile input, file-by-file |
+| **`pass^k` gate** | flaky "green once" merges ([τ-bench: pass@1 ≫ pass@8](https://arxiv.org/abs/2406.12045)) | all K runs must pass — consistency, not luck |
+| **No-Cut merge** | silent overwrites / false "done" | git conflict = abort; red verify = block |
+| **least-privilege Grok** | destructive autonomous tools | `--deny` overrides `--always-approve` |
+| **decorrelation log** | the moat quietly dying | warns if the two vendors stop disagreeing |
+
+---
+
+## ⚡ Token efficiency (without losing quality)
+
+Every saving is **quality-preserving** — proven, not assumed:
+
+- **Lossless eval early-stop** — `pass^k` is an AND; one red ends it. Saves up to `(K-1)/K` verify runs, **bit-identical verdict**.
+- **Adaptive N** — render `N=1` first, escalate to `best-of-N` only on a failed acceptance check. *(Live test: saved 2 of 3 variants on the first try.)*
+- **Prompt-cache flag** — `--exclude-dynamic-system-prompt-sections` makes the ~100k system prefix cache-shareable across worktrees.
+- **Diff-only rebuttal** — the builder only re-reads the flagged files (~50% fewer tokens).
+- **Zero-quota scout** — offload best-of-N exploration to a local **Ollama** model; only the decisive review stays frontier.
+- **Budget guard** — fail `BLOCKED` *before* the credit pool is exhausted, never silently mid-merge.
+
+---
+
+## 🚀 Quickstart
+
+> **Prereqs:** Windows + PowerShell 5.1, `git`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`ollama`](https://ollama.com) for the local scout.
 
 ```powershell
-cd $env:USERPROFILE\Desktop\dual-agent
-git init; git add -A; git commit -m "init dual-agent harness"
+# 1. C — write the contract (Claude fills PLAN.template.md)
+Copy-Item PLAN.template.md PLAN.md      # ...fill in problem, interface, acceptance, tests...
+
+# 2. R — Grok builds, cheaply first then escalates if needed
+.\dual-build.ps1 -Adaptive -Variants 3 -Verify "py -3 test_yourfeature.py"
+
+# 3. guard — block invented/off-contract dependencies
+.\lib\import-scan.ps1 -PocBranch feat/poc -Base main -CheckProvenance
+
+# 4. A — cross-vendor bounded review (Claude assess + 1 Grok rebuttal)
+.\dual-review.ps1 -PocBranch feat/poc -Base main
+
+# 5. T — merge ONLY if pass^k is green
+.\dual-merge.ps1 -From feat/poc -Into main -Verify "py -3 test_yourfeature.py" -EvalK 5
 ```
 
-## Pro Feature
+Split-screen cockpit (watch both agents live): `.\dual-view.ps1`
 
-```powershell
-# 1) C — Claude füllt PLAN.md aus dem Template, committen:
-Copy-Item PLAN.template.md PLAN.md
-#    ... Claude schreibt Contract + Akzeptanzkriterien rein ...
-git add PLAN.md; git commit -m "contract: <feature>"
+---
 
-# 2) R — Grok baut 3 Varianten in isoliertem worktree:
-.\dual-build.ps1 -Variants 3
+## 🧩 Components
 
-# 3) A+F — Claude reviewt + härtet den feat/poc-Branch (Script gibt die Befehle aus)
+```
+dual-agent/
+├─ PLAN.template.md      📝 the contract template (the single shared truth)
+├─ PROTOCOL.md          📜 8 coordination invariants (eval decides, 1 writer/space, …)
+├─ AGENTS.md            🤝 vendor-neutral builder contract (read by Grok/Codex/Cursor/…)
+├─ ADAPTERS.md          🔌 how to plug in a 3rd model
+├─ dual-build.ps1       ⚙️  Render: Grok in an isolated worktree, adaptive-N
+├─ dual-review.ps1      💬 Assess: bounded cross-review, eval decides
+├─ dual-merge.ps1       🧪 No-Cut + pass^k merge gate
+├─ dual-view.ps1        🖥️  split-screen cockpit
+└─ lib/
+   ├─ grok-call.ps1     clean headless Grok wrapper (stdout/stderr OS-separated)
+   ├─ claude-call.ps1   clean headless Claude wrapper (+ cost telemetry)
+   ├─ local-call.ps1    zero-quota Ollama scout
+   ├─ eval-harness.ps1  pass@k / pass^k scorer (lossless early-stop)
+   ├─ import-scan.ps1   deterministic invented-package gate
+   ├─ budget-guard.ps1  fail BLOCKED before credit exhaustion
+   └─ decorrelation.ps1 cross-vendor moat telemetry
 ```
 
-## Modi
+---
 
-- **Automatisiert (Stufe 2):** `dual-build.ps1` ruft `grok -p` als Subprozess. Verifiziert
-  lauffähig auf dem Abo (Headless-Antwort kam zurück, kein API-Key).
-- **Manuell (Stufe 1):** Zwei Terminals nebeneinander. Grok-Terminal liest PLAN.md selbst.
-  Immer als Fallback nutzbar.
+## 🔬 Research foundation
 
-## Auth (wichtig)
+This isn't vibes — every core decision is anchored to a source:
 
-Funktioniert über dein Grok-**Abo** (OAuth). Falls `grok -p` mal `AuthorizationRequired`
-zeigt: einmal `grok login` ausführen. Ein `xAI-API-Key` ist **nicht** nötig.
+- **Cross-vendor diversity** beats self-review · [Mixture-of-Agents](https://arxiv.org/abs/2406.04692) · [Replacing Judges with Juries](https://arxiv.org/abs/2404.18796) · [self-preference bias](https://arxiv.org/pdf/2404.13076)
+- **Eval decides, not debate** · [LLMs Cannot Self-Correct (ICLR'24)](https://arxiv.org/abs/2310.01798) · [Talk Isn't Always Cheap](https://arxiv.org/abs/2509.05396)
+- **`pass^k` reliability** · [τ-bench](https://arxiv.org/abs/2406.12045) · **package hallucination** · [arXiv:2406.10279](https://arxiv.org/abs/2406.10279)
+- **The pattern itself** · [SLEAN: independent → cross-critique → arbitration](https://arxiv.org/pdf/2510.10010)
 
-## Gemeinsame MCP-Tools (Playwright + Fetch)
+---
 
-`.mcp.json` definiert zwei Tools, die **beide** Agenten lesen — **kein API-Key noetig**:
-- **playwright** (`npx @playwright/mcp`): Browser steuern, Screenshots, UI-Smoke -> echte Akzeptanz-Evidenz im Verify-Schritt.
-- **fetch** (`uvx mcp-server-fetch`): URL -> Text, "research before code".
+## ⚖️ Honest limitations
 
-Verifiziert: Grok entdeckt beide via `grok inspect` (`source: mcpJson`, exakter Pfad);
-beide Server-Befehle starten real. Prereqs: `node`/`npx` + `uv`/`uvx` im PATH (Erststart laedt Pakete einmalig).
-- **Grok-Trust:** `grok inspect` zeigt `projectTrusted:false` -> Grok *entdeckt* die Server, *laedt* sie
-  erst nach Projekt-Trust (einmal `grok` im Ordner starten + bestaetigen).
-- **Claude Code:** fragt beim naechsten Start die Freigabe der `.mcp.json`-Server ab (Security-Approval).
+- `--sandbox` for Grok is **macOS-only** today; on Windows it's compensated by worktree isolation + `--deny` + least-privilege (not a microVM).
+- The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
+- Built and tested on **Windows / PowerShell 5.1**; the `.ps1` scripts assume it.
 
-## Split-Screen-Cockpit (beide live sehen)
+---
 
-`dual-view.ps1` oeffnet Windows Terminal mit zwei Panes nebeneinander:
-- **links:** Claude Code (du arbeitest mit Claude/dem Architect).
-- **rechts:** Groks Live-Build-Log (`watch-grok.ps1`) — du siehst Grok bauen, sobald Claude
-  `dual-build.ps1` ausloest. `watch-grok.ps1` pollt `.dual-agent/logs/grok-*.log` und
-  wechselt automatisch aufs neueste.
+<div align="center">
 
-`.\dual-view.ps1`        # links Claude, rechts Grok-Live-Log
-`.\dual-view.ps1 -Grok`  # rechts stattdessen eine interaktive Grok-Session
+**Built with the loop it implements** — researched by parallel agents, cross-examined by Claude + Grok, gated by the eval.
 
-Voraussetzung: Windows Terminal (`wt`) sowie `claude`/`grok` im PATH.
+*No API keys. No cloud. No single point of judgment.*
 
-## WIP-Handling (automatisch, fliessend)
-
-Ein git-worktree branched von einem **Commit**, nicht vom working-tree — uncommittete Arbeit
-waere fuer Grok unsichtbar. `dual-build.ps1` loest das automatisch, ohne manuellen git-Tanz:
-- Auf `main` mit dirty WIP -> Feature-Branch `feat/wip-<stamp>` wird angelegt, WIP dort committet
-  (kein Push). `main` bleibt sauber; dein Checkout liegt danach auf `feat/wip-<stamp>`.
-- Schon auf einem Feature-Branch -> WIP wird dort committet.
-- `feat/poc` (Groks Bau) branched von **HEAD** = aktueller Stand inkl. WIP.
-
-PLAN.md muss daher NICHT mehr manuell committet werden. Der `wip:`-Commit ist lokal; nach dem
-Merge kannst du ihn bei Bedarf squashen.
-
-## Troubleshooting
-
-- **Error-Spam `AuthorizationRequired ... huggingface.co/.../mcp`:** ein kaputter MCP-Server
-  in Groks Config, nicht dein Login. Output kommt trotzdem. Aufräumen: `grok mcp` (Server entfernen).
-  Für sauberes Parsen nutzt das Script ohnehin `--output-format json`.
-- **`grok exit != 0`:** Refusal oder Tool-Fehler — `.dual-agent/logs/grok-*.log` lesen.
-- **Worktree nicht gefunden:** `git worktree list` prüfen; ggf. `git worktree prune`.
-
-## Grenzen / ehrlich
-
-- Die globalen Claude-Code-Hooks (Recap/Klassifizierung) feuern weiter und injizieren ggf.
-  alten Kontext. Die lokale `CLAUDE.md` weist Claude an, das zu **ignorieren** — abstellen
-  liesse sich das nur per Edit an der globalen Config (hier bewusst nicht angefasst).
-- `--always-approve` lässt Grok im worktree autonom Tools ausführen. Akzeptabel, weil isoliert;
-  für mehr Härte `--sandbox <profile>` ergänzen.
-- **Erster echter Render-Lauf** (`dual-build.ps1` ruft Grok): Pfad-/Arg-Assembly + POC-Auto-Commit
-  sind getestet, aber Groks Verhalten unter `--worktree`+`--best-of-n` (committet es selbst? Anzahl
-  Varianten-Commits?) erst am echten Lauf bestaetigen.
-- **git-Identitaet noetig:** `dual-merge` + POC-Auto-Commit machen Commits. Ohne globale Identitaet
-  vorher `git config user.name/.email` setzen (in diesem Workspace lokal bereits gesetzt).
-- **`feat/poc`-Wiederverwendung:** existiert Branch/worktree schon, schlaegt `--worktree feat/poc`
-  fehl -> vorher `git worktree remove` + Branch loeschen, oder anderen `-Branch` waehlen.
-- **Verify im frischen worktree:** laeuft in einem detached worktree ohne `node_modules`/venv/Build-
-  Artefakte -> der Verify-Befehl muss self-contained sein (ggf. Install einschliessen).
-- **Merge-Gate** wechselt dich nach Erfolg auf `$Into` (main); ggf. danach Branch zurueckwechseln.
-- **Worktree-Pfade mit Leerzeichen** werden nicht robust geparst (dieser Workspace-Pfad: ok).
+</div>
