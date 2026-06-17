@@ -169,6 +169,15 @@ if ($Adaptive -and $Variants -gt 1 -and $Verify -and $grokExit -eq 0) {
 Write-Host "`n=== Render fertig (grok exit=$grokExit) ===" -ForegroundColor Cyan
 Write-Host "Worktree-Pfad: $wtPath"
 # POC als Commit sichern: das Merge-Gate merged Branch-Commits, nicht nur working-tree-Aenderungen.
+# Vorher Harness/Session-Artefakte raeumen, die Groks Run im worktree hinterlaesst (MCP-Cache,
+# pycache, tmp, last_session) -- sie sind NICHT Teil des POC und verschmutzen sonst den Review-Diff
+# (im Live-Test aufgedeckt: 24 statt 1 Datei). Nur Groks echte Arbeit bleibt so im Diff.
+foreach ($junk in @('mcps', '.dual-agent', '__pycache__')) {
+    $jp = Join-Path $wtPath $junk
+    if (Test-Path $jp) { Remove-Item -Recurse -Force $jp -ErrorAction SilentlyContinue }
+}
+$lsj = Join-Path $wtPath '.claude\last_session.md'
+if (Test-Path $lsj) { Remove-Item -Force $lsj -ErrorAction SilentlyContinue }
 git -C $wtPath add -A 2>$null | Out-Null
 if (git -C $wtPath status --porcelain) {
     git -C $wtPath commit -q -m "poc: grok build $stamp" 2>$null | Out-Null
