@@ -31,7 +31,20 @@ block() { echo "guard-bad-calls BLOCKED: $1 — $2" >&2; exit 2; }
 
 # --- pattern table (ERE), checked in order ----------------------------------
 sp='[[:space:]]'
-re_rmrf="rm$sp+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)$sp+(/($sp|\$)|/\*|~|\\\$HOME|\.\.|\.git($sp|/|\$))"
+# Dangerous recursive-force delete of a protected path. Neuro-drill hardening:
+# recursive+force can be one token (-rf / -fr), split (-r -f), or long-form
+# (--recursive --force, any order) -> detect the CAPABILITIES independently, not
+# a fixed spelling. is_rm_force_recursive() sets the verdict; regex just scopes.
+re_danger_path="(/($sp|\$)|/\*|~($sp|/|\$)|\\\$HOME|\.\.|\.git($sp|/|\$)|/(etc|usr|bin|boot|var|lib|dev|sys|proc)($sp|/|\$))"
+is_dangerous_rm() {
+  local c="$1"
+  [[ "$c" =~ (^|[[:space:];&|])rm($sp|$) ]] || return 1          # is it an rm invocation?
+  local recursive=0 force=0
+  [[ "$c" =~ (^|$sp)-[a-zA-Z]*r[a-zA-Z]*($sp|$) || "$c" =~ --recursive($sp|$) ]] && recursive=1
+  [[ "$c" =~ (^|$sp)-[a-zA-Z]*f[a-zA-Z]*($sp|$) || "$c" =~ --force($sp|$) ]] && force=1
+  [[ $recursive -eq 1 && $force -eq 1 ]] || return 1
+  [[ "$c" =~ $re_danger_path ]]                                   # ...at a protected path
+}
 re_dev="mkfs|dd$sp+[^|]*of=/dev/"
 re_chmod="chmod$sp+(-R$sp+)?777"
 re_fork=':\(\)\{[[:space:]]*:\|:&[[:space:]]*\};'
@@ -44,7 +57,7 @@ re_skipperm="dangerously-skip-permissions"
 re_secret_files='(^|/)(\.env|id_rsa|id_ed25519|[^/]*\.pem|auth\.json)$'
 
 if [[ "$tool" == "Bash" ]]; then
-  [[ "$cmd" =~ $re_rmrf ]]      && block "recursive force-delete of a protected path" "$cmd"
+  is_dangerous_rm "$cmd"       && block "recursive force-delete of a protected path" "$cmd"
   [[ "$cmd" =~ $re_dev ]]       && block "raw device write" "$cmd"
   [[ "$cmd" =~ $re_chmod ]]     && block "world-writable chmod" "$cmd"
   [[ "$cmd" =~ $re_fork ]]      && block "fork bomb" "$cmd"

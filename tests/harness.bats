@@ -151,3 +151,43 @@ PY
   # settings backup exists
   ls "$CLAUDE_CONFIG_DIR"/settings.json.bak-* >/dev/null
 }
+
+# --- NEURO-DRILL regressions: rm capability detection (not fixed spellings) ---
+
+@test "guard: rm split flags '-r -f' at / blocked (drill finding)" {
+  guard '{"tool_name":"Bash","tool_input":{"command":"rm -r -f /"}}'
+  [ "$status" -eq 2 ]
+}
+
+@test "guard: rm long-form '--recursive --force' at / blocked (drill finding)" {
+  guard '{"tool_name":"Bash","tool_input":{"command":"rm --recursive --force /"}}'
+  [ "$status" -eq 2 ]
+  guard '{"tool_name":"Bash","tool_input":{"command":"rm --force --recursive /"}}'
+  [ "$status" -eq 2 ]
+}
+
+@test "guard: rm -rf on protected system + home + .git blocked" {
+  for p in /etc "~" .git ..; do
+    guard "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf $p\"}}"
+    [ "$status" -eq 2 ]
+  done
+}
+
+@test "guard: rm without BOTH recursive AND force is allowed (no false positive)" {
+  guard '{"tool_name":"Bash","tool_input":{"command":"rm file.txt"}}'
+  [ "$status" -eq 0 ]
+  guard '{"tool_name":"Bash","tool_input":{"command":"rm -r ./dir"}}'
+  [ "$status" -eq 0 ]
+}
+
+@test "guard: scoped recursive-force deletes stay allowed (build/node_modules/worktree)" {
+  for p in ./build node_modules /tmp/wt-feat-poc; do
+    guard "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf $p\"}}"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "guard: a word merely containing 'rm' is not an rm invocation" {
+  guard '{"tool_name":"Bash","tool_input":{"command":"echo warm"}}'
+  [ "$status" -eq 0 ]
+}
