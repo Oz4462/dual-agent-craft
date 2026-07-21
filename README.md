@@ -14,7 +14,7 @@ A local build harness where **Claude Code** (architect/reviewer) and **Grok CLI*
 ![Ollama](https://img.shields.io/badge/Ollama-zero--quota_scout-000000?logo=ollama&logoColor=white)
 ![API keys](https://img.shields.io/badge/API_keys-0-2ea44f)
 ![Merge gate](https://img.shields.io/badge/merge-pass%5Ek_gated-1f6feb)
-![Tests](https://img.shields.io/badge/bats_suite-66%2F66-2ea44f)
+![Tests](https://img.shields.io/badge/bats_suite-88%2F88-2ea44f)
 
 </div>
 
@@ -117,7 +117,7 @@ cp PLAN.template.md PLAN.md          # ...fill in problem, interface, acceptance
 ```
 
 Split-screen cockpit (tmux, watch both agents live): `./dual-view.sh`
-Run the deterministic test suite (66 tests, offline): `tests/run.sh`
+Run the deterministic test suite (88 tests, offline): `tests/run.sh`
 
 <details>
 <summary><b>Windows (PowerShell 5.1) — original, preserved</b></summary>
@@ -158,8 +158,35 @@ dual-agent-craft/
 │  ├─ test-guard.sh     deterministic invariant-7 gate (builder can't edit tests)
 │  ├─ budget-guard.sh   fail BLOCKED before credit exhaustion
 │  └─ decorrelation.sh  cross-vendor moat telemetry
-├─ tests/               🧪 49 offline bats tests (guards, gate invariants, adapters)
+├─ tests/               🧪 offline bats suite (guards, gate invariants, adapters, harness)
+├─ harness/             🧠 the MAIN HARNESS layer (see below)
 └─ powershell/          🪟 the original, live-verified Windows PS-5.1 variant
+```
+
+## 🧠 Main Harness (operating layer)
+
+The `harness/` directory is the always-on operating contract for every agent working here — installable into `~/.claude` (`harness/install.sh`, dry-run by default) and mirrored to Grok/Codex via `AGENTS.md`:
+
+| Piece | What it is |
+|---|---|
+| `CONTRACT.md` | prime directives + operations rules (fail closed, eval decides, verify before done) |
+| `REFLEXES.md` | 15 stimulus→response rules that fire before reasoning |
+| `MUSCLE-MEMORY.md` | **33 earned lessons** (⚡-marked ones were paid for live in this repo) |
+| `PATTERNS.md` | proven orchestration / guard / code / testing shapes |
+| `operations/` | `permissions.json` (allow/ask/deny) + 3 hooks: **guard-bad-calls** (PreToolUse, fail-closed), **format-and-log** (PostToolUse), **clean-exit** (Stop → shift-note skeleton) |
+| `skills/` | 10 packs: triage-repo · audit-threats · react-a11y · jest-browser · safe-rewrites · readmes-apis · pandas-sql · prs-rebases · project-brief · loop-runner |
+| `teams/` | Claude+Grok+Codex roster, `agents.json` for `claude --agents`, live display via `--forward-subagent-text` |
+| `workflows/` | W1–W6 dynamic workflows (feature/bugfix/refactor/audit/loop/data) + escalation matrix |
+| `automations/` | nightly suite, weekly decorrelation trend, spend report (cron templates) |
+| `prompts/` | fresh-context subagent brief, untrusted-review lenses |
+| `shift-notes/` | append-only cross-session SHIFT-LOG (clean-exit hook auto-skeletons it) |
+| `bin/loop-runner.sh` | bounded loops: done-condition + caps + STALLED detection, JSONL log |
+| `bootstrap.sh` | vetted online bootstrap (download→inspect→run — never `curl \| bash`) |
+
+```bash
+harness/install.sh                          # dry-run: show what would change
+HARNESS_INSTALL_CONFIRM=1 harness/install.sh  # install (settings merged, backup kept)
+claude --agents "$(cat harness/teams/agents.json)" --forward-subagent-text   # team mode
 ```
 
 ---
@@ -180,7 +207,7 @@ This isn't vibes — every core decision is anchored to a source:
 - `--sandbox` for Grok is **macOS-only** today; compensated by worktree isolation + `--deny` + least-privilege. On Linux, **Codex's `-s read-only|workspace-write` is a real local sandbox** — use `lib/codex-call.sh` where sandboxing matters.
 - The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
 - The bash harness is tested on **Linux (bash 5.x)**; macOS should work but is unverified. The original **Windows / PowerShell 5.1** variant is preserved in `powershell/` (live-verified 2026-06).
-- The deterministic suite (66 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
+- The deterministic suite (88 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
 - `ledger/SPEND.jsonl` (budget telemetry) is a plain, unsigned file — the budget guard is a *cost-control convenience*, not a security boundary. By default it lives in-repo, where code running during `--verify` could locate it via `git rev-parse --git-common-dir` and tamper with it; set `DUAL_AGENT_SPEND_FILE=~/.local/state/dual-agent/SPEND.jsonl` (honoured by both writer and guard) to move it outside any git tree.
 
 ---
