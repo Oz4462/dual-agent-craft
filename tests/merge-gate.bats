@@ -82,3 +82,22 @@ EOF
   [ "$status" -ne 0 ]
   ! git -C "$REPO" log --oneline main | grep -q cheat
 }
+
+@test "AUDIT-P0: checkout into a branch held by another worktree BLOCKS (no wrong-branch merge)" {
+  # hold $INTO (main) in a second linked worktree so `git checkout main` in the
+  # primary must fail -> the gate must refuse, never merge into whatever's current.
+  held="$SCRATCH/held"
+  git -C "$REPO" worktree add -q "$held" main 2>/dev/null || skip "git refused second worktree (version)"
+  # move primary off main so main is ONLY in the held worktree
+  git -C "$REPO" checkout -q feat/harden
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-merge.sh" --from feat/harden --into main --force
+  # either it blocks on checkout, or (if this git allows the checkout) it still
+  # must not falsely claim success on the wrong branch
+  if [ "$status" -eq 0 ]; then
+    [ "$(git -C "$REPO" rev-parse --abbrev-ref HEAD)" = "main" ]
+  else
+    [[ "$output" == *BLOCKED* ]]
+  fi
+  cd - >/dev/null
+}

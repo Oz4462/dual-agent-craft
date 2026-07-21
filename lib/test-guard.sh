@@ -36,19 +36,27 @@ done
 PATTERN='(^|/)(tests?|__tests__|spec)/|(^|/)conftest\.py$|(^|/)verify/|_test\.(py|js|ts|go|rs)$|\.test\.(js|ts|jsx|tsx)$|\.spec\.(js|ts|jsx|tsx)$|(^|/)test_[^/]+\.py$|_spec\.rb$'
 [[ -n "$EXTRA" ]] && PATTERN="$PATTERN|$EXTRA"
 
-if [[ -z "$DIFF_FILES" ]]; then
+files=()
+if [[ -n "$DIFF_FILES" ]]; then
+  # injected list (tests): newline-separated
+  while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done <<<"$DIFF_FILES"
+else
   # FAIL-CLOSED: a failing git diff (bad/missing branch) must BLOCK, never
   # silently produce an empty list that reads as "PASS" (audit finding).
-  if ! DIFF_FILES="$(git diff --name-only "$BASE...$POC" 2>&1)"; then
-    fail_code 2 "test-guard: git diff failed ($BASE...$POC) — cannot verify invariant 7: $DIFF_FILES"
+  # core.quotePath=false + -z: NON-ASCII filenames (tests/prüfung.py) are NOT
+  # C-quoted, so the leading/trailing '"' can't defeat the ^/$ pattern anchors —
+  # an umlaut in a test filename must not turn BLOCK into PASS (P0 audit finding).
+  if ! git rev-parse --verify "$BASE" >/dev/null 2>&1 || ! git rev-parse --verify "$POC" >/dev/null 2>&1; then
+    fail_code 2 "test-guard: bad ref ($BASE...$POC) — cannot verify invariant 7 (fail-closed)."
   fi
+  mapfile -d '' -t files < <(git -c core.quotePath=false diff --name-only -z "$BASE...$POC" 2>/dev/null)
 fi
 
 violations=()
-while IFS= read -r f; do
+for f in "${files[@]:-}"; do
   [[ -z "$f" ]] && continue
   if printf '%s' "$f" | grep -qiE "$PATTERN"; then violations+=("$f"); fi
-done <<<"$DIFF_FILES"
+done
 
 [[ -z "$OUTFILE" ]] && { ledger="$(repo_root)/ledger"; mkdir -p "$ledger"; OUTFILE="$ledger/TEST-GUARD.json"; }
 verdict="PASS"; [[ ${#violations[@]} -gt 0 ]] && verdict="BLOCK"

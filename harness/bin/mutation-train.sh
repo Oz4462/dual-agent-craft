@@ -14,7 +14,16 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
 [[ -z "$(git status --porcelain)" ]] || { echo "BLOCKED: working tree not clean (mutation-train restores via checkout — commit/stash first)."; exit 1; }
 
-survivors=0; killed=0
+# CRITICAL (self-found): if this tool is KILLED mid-mutation (SIGTERM from a
+# timeout, Ctrl-C), the per-mutation `git checkout` restore never runs and leaves
+# a MUTATED file on disk — silently weakening a live guard. An EXIT/INT/TERM trap
+# guarantees the tree is always restored, whatever kills us.
+MUT_TARGETS=(lib dual-merge.sh dual-review.sh dual-build.sh harness)
+restore_all() { git checkout -- "${MUT_TARGETS[@]}" 2>/dev/null || true; }
+trap 'restore_all; echo "mutation-train: interrupted — tree restored." >&2; exit 130' INT TERM
+trap restore_all EXIT
+
+survivors=0; killed=0; skipped=0
 run_suite() { tests/run.sh >/dev/null 2>&1; }
 
 # mutate <file> <sed-expr> <description>
@@ -24,8 +33,11 @@ mutate() {
   sed -i "$expr" "$file"
   after=$(md5sum "$file")
   if [[ "$before" == "$after" ]]; then
-    printf 'SKIP  (sed no-op — module changed?) %s\n' "$desc"
-    git checkout -- "$file" 2>/dev/null; return
+    # A no-op sed means the module changed out from under the mutation -> this
+    # mutation no longer tests anything. That is a COVERAGE REGRESSION, not a
+    # pass (fail-open otherwise: all-skipped would read as "all killed").
+    printf 'SKIP! (sed no-op — module refactored, mutation stale) %s\n' "$desc"
+    skipped=$((skipped+1)); git checkout -- "$file" 2>/dev/null; return
   fi
   if run_suite; then
     printf 'SURVIVED  %-52s <- TEST GAP\n' "$desc"; survivors=$((survivors+1))
@@ -45,8 +57,8 @@ mutate lib/eval-harness.sh 's/int(passes==k)/int(passes>=1)/' \
   "eval-harness: pass^k downgraded to pass@k"
 mutate lib/eval-harness.sh 's/early_stopped=true; break/early_stopped=true/' \
   "eval-harness: lossless early-stop no longer breaks"
-mutate lib/test-guard.sh 's/if ! DIFF_FILES=/DIFF_FILES=/; s/git diff --name-only "\$BASE...\$POC" 2>&1)"; then/git diff --name-only "$BASE...$POC" 2>\/dev\/null || true)"/' \
-  "test-guard: swallow git-diff error (bad branch -> PASS)"
+mutate lib/test-guard.sh 's/fail_code 2 "test-guard: bad ref/: # &/' \
+  "test-guard: bad-ref no longer blocks (fail-open)"
 mutate dual-merge.sh 's/\[\[ "\$verify_ok" == true \]\] || fail/true || fail/' \
   "dual-merge: verify gate always green"
 mutate harness/operations/hooks/guard-bad-calls.sh 's/is_dangerous_rm "\$cmd"       && block/false \&\& block/' \
@@ -62,13 +74,14 @@ mutate dual-review.sh 's/fail "Claude.s ASSESS reply contained no parseable/echo
 mutate harness/bin/loop-runner.sh 's/if (( stall >= 1 )); then/if false; then/' \
   "loop-runner: STALLED detection disabled"
 
-# safety net: restore anything the loop might have left mutated on an error
-git checkout -- lib dual-merge.sh dual-review.sh harness 2>/dev/null || true
+# (EXIT trap already restores the tree.)
 
 echo ""
-echo "=== RESULT: killed=$killed  survived=$survivors ==="
-if [[ $survivors -eq 0 ]]; then
+echo "=== RESULT: killed=$killed  survived=$survivors  skipped=$skipped ==="
+if [[ $survivors -eq 0 && $skipped -eq 0 ]]; then
   echo "ALL MUTATIONS KILLED — fail-closed muscles strong."; exit 0
+elif [[ $skipped -gt 0 ]]; then
+  echo "STALE MUTATIONS: $skipped no-op sed(s) — a module was refactored, its mutation no longer tests anything. Update the mutation set, then re-run."; exit 1
 else
   echo "GAPS FOUND: $survivors surviving mutation(s) — add tests, then re-run."; exit 1
 fi

@@ -72,5 +72,31 @@ guard() { run "$HARNESS_ROOT/lib/test-guard.sh" --out "$SCRATCH/tg.json" "$@"; }
   cd "$SCRATCH/repo"
   guard --poc no-such-branch --base also-missing
   [ "$status" -eq 2 ]
-  [[ "$output" == *"git diff failed"* ]]
+  [[ "$output" == *"bad ref"* ]]
+}
+
+@test "AUDIT-P0: non-ASCII test filename (umlaut) still BLOCKS (git quotePath bypass)" {
+  make_repo "$SCRATCH/repo"
+  git -C "$SCRATCH/repo" checkout -qb feat/poc
+  mkdir -p "$SCRATCH/repo/tests"
+  printf 'x\n' > "$SCRATCH/repo/tests/prüfung.py"
+  git -C "$SCRATCH/repo" add -A
+  git -C "$SCRATCH/repo" commit -qm sneaky
+  cd "$SCRATCH/repo"
+  guard --poc feat/poc --base main
+  [ "$status" -eq 2 ]
+  cd - >/dev/null
+}
+
+@test "AUDIT-P0: non-ASCII IMPL filename (umlaut) still PASSES (no false positive)" {
+  make_repo "$SCRATCH/repo"
+  git -C "$SCRATCH/repo" checkout -qb feat/poc
+  mkdir -p "$SCRATCH/repo/src"
+  printf 'x\n' > "$SCRATCH/repo/src/lösung.py"
+  git -C "$SCRATCH/repo" add -A
+  git -C "$SCRATCH/repo" commit -qm impl
+  cd "$SCRATCH/repo"
+  guard --poc feat/poc --base main
+  [ "$status" -eq 0 ]
+  cd - >/dev/null
 }

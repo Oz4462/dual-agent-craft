@@ -88,7 +88,13 @@ else
 fi
 
 # --- Merge (conflict = abort, never overwrite) -----------------------------
-git checkout "$INTO" >/dev/null 2>&1
+# Guard the checkout (P0 audit finding): if $INTO is held by another linked
+# worktree or checkout otherwise fails, an unguarded checkout would leave a
+# DIFFERENT branch current and merge into the WRONG target while printing a
+# false "MERGED / No-Cut upheld". Every other git step here is guarded; so is this.
+git checkout "$INTO" >/dev/null 2>&1 || fail "checkout $INTO failed (checked out in another worktree? stale wt-* leftover?) — no merge."
+cur_now="$(git rev-parse --abbrev-ref HEAD)"
+[[ "$cur_now" == "$INTO" ]] || fail "expected HEAD=$INTO after checkout but got '$cur_now' — refusing to merge into the wrong branch."
 if ! git merge --no-ff --no-edit "$FROM"; then
   git merge --abort
   fail "git conflict — merge aborted. Human decides (invariant 3)."
