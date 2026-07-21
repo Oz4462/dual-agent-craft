@@ -28,7 +28,7 @@ Bridge: Dateien (`PLAN.md`) + git-worktrees + `grok -p` als Subprozess.
 
 1. **C — Contract.** Claude schreibt `PLAN.md` aus `PLAN.template.md`:
    Problem, Interface-Contract, Akzeptanzkriterien, Test-Liste, Constraints. **Noch kein Code.**
-2. **R — Render.** `dual-build.ps1` ruft Grok headless in einem isolierten worktree mit
+2. **R — Render.** `dual-build.sh` ruft Grok headless in einem isolierten worktree mit
    `--best-of-n N` → N POC-Varianten, beste gewinnt.
 3. **A — Assess.** Claude reviewt Groks Diff als **untrusted external code**:
    erfüllt es den Contract? Drift? halluzinierte APIs? fehlendes Error-Handling?
@@ -39,7 +39,7 @@ Bridge: Dateien (`PLAN.md`) + git-worktrees + `grok -p` als Subprozess.
 
 Regeln in `PROTOCOL.md`, Zustand in `HANDOFF.md` (Staffelstab). Vor jedem Turn:
 prüfen, ob ich den `BATON` halte. **Niemals** dieselbe Datei wie Grok gleichzeitig
-editieren. Zusammenführen ausschließlich über `dual-merge.ps1` (No-Cut-Gate:
+editieren. Zusammenführen ausschließlich über `dual-merge.sh` (No-Cut-Gate:
 Konflikt = Abbruch, Verify rot = kein Merge). Turn immer mit `SUGGESTIONS`-Block beenden.
 
 ## Review-Disziplin (Schritt A)

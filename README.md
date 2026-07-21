@@ -6,13 +6,15 @@
 
 A local build harness where **Claude Code** (architect/reviewer) and **Grok CLI** (builder) collaborate across vendor lines — and an **objective `pass^k` eval**, never their agreement, decides what ships.
 
-![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE?logo=powershell&logoColor=white)
+![Bash](https://img.shields.io/badge/Bash-5.x_Linux%2FmacOS-4EAA25?logo=gnubash&logoColor=white)
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1_Windows-5391FE?logo=powershell&logoColor=white)
 ![Claude Code](https://img.shields.io/badge/Claude_Code-architect%2Freviewer-D97757)
 ![Grok CLI](https://img.shields.io/badge/Grok_CLI-builder-111111)
+![Codex](https://img.shields.io/badge/Codex-3rd_vendor%2C_sandboxed-10a37f)
 ![Ollama](https://img.shields.io/badge/Ollama-zero--quota_scout-000000?logo=ollama&logoColor=white)
 ![API keys](https://img.shields.io/badge/API_keys-0-2ea44f)
 ![Merge gate](https://img.shields.io/badge/merge-pass%5Ek_gated-1f6feb)
-![Live-tested](https://img.shields.io/badge/end--to--end-live--verified-2ea44f)
+![Tests](https://img.shields.io/badge/bats_suite-49%2F49-2ea44f)
 
 </div>
 
@@ -69,6 +71,7 @@ Every guard is **deterministic** where possible (nothing in the loop that can it
 | **untrusted-code review** | drift from the contract | Claude reviews Grok's diff as hostile input, file-by-file |
 | **`pass^k` gate** | flaky "green once" merges ([τ-bench: pass@1 ≫ pass@8](https://arxiv.org/abs/2406.12045)) | all K runs must pass — consistency, not luck |
 | **No-Cut merge** | silent overwrites / false "done" | git conflict = abort; red verify = block |
+| **`test-guard`** | the builder gaming the gate by editing tests (invariant 7) | deterministic diff scan for test/verify files, **fail-closed, zero tokens** |
 | **least-privilege Grok** | destructive autonomous tools | `--deny` overrides `--always-approve` |
 | **decorrelation log** | the moat quietly dying | warns if the two vendors stop disagreeing |
 
@@ -87,51 +90,76 @@ Every saving is **quality-preserving** — proven, not assumed:
 
 ---
 
-## 🚀 Quickstart
+## 🚀 Quickstart (Linux / macOS — bash)
 
-> **Prereqs:** Windows + PowerShell 5.1, `git`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`ollama`](https://ollama.com) for the local scout.
+> **Prereqs:** bash 5.x, `git`, `python3`, `curl`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`codex`](https://github.com/openai/codex) as a sandboxed 3rd vendor and [`ollama`](https://ollama.com) for the local scout.
 
-```powershell
+```bash
 # 1. C — write the contract (Claude fills PLAN.template.md)
-Copy-Item PLAN.template.md PLAN.md      # ...fill in problem, interface, acceptance, tests...
+cp PLAN.template.md PLAN.md          # ...fill in problem, interface, acceptance, tests...
 
 # 2. R — Grok builds, cheaply first then escalates if needed
-.\dual-build.ps1 -Adaptive -Variants 3 -Verify "py -3 test_yourfeature.py"
+./dual-build.sh --adaptive --variants 3 --verify "python3 -m pytest -q"
 
-# 3. guard — block invented/off-contract dependencies
-.\lib\import-scan.ps1 -PocBranch feat/poc -Base main -CheckProvenance
+# 3. guards — block invented deps + test-file tampering (both deterministic, zero tokens)
+./lib/import-scan.sh --poc feat/poc --base main --check-provenance
+./lib/test-guard.sh  --poc feat/poc --base main
 
 # 4. A — cross-vendor bounded review (Claude assess + 1 Grok rebuttal)
-.\dual-review.ps1 -PocBranch feat/poc -Base main
+./dual-review.sh --poc feat/poc --base main
 
-# 5. T — merge ONLY if pass^k is green
-.\dual-merge.ps1 -From feat/poc -Into main -Verify "py -3 test_yourfeature.py" -EvalK 5
+# 4b. subjective tie? -> measure, don't argue (invariant 8)
+./dual-tiebreak.sh --verify "python3 -m pytest -q" \
+    --approach-a "lookup table" --approach-b "iterative compute"
+
+# 5. T — merge ONLY if pass^k is green (and the builder didn't touch tests)
+./dual-merge.sh --from feat/poc --into main --verify "python3 -m pytest -q" --eval-k 5 --test-guard
 ```
 
-Split-screen cockpit (watch both agents live): `.\dual-view.ps1`
+Split-screen cockpit (tmux, watch both agents live): `./dual-view.sh`
+Run the deterministic test suite (49 tests, offline): `tests/run.sh`
+
+<details>
+<summary><b>Windows (PowerShell 5.1) — original, preserved</b></summary>
+
+The live-verified Windows variant lives unchanged in <code>powershell/</code>:
+
+```powershell
+.\powershell\dual-build.ps1 -Adaptive -Variants 3 -Verify "py -3 test_yourfeature.py"
+.\powershell\lib\import-scan.ps1 -PocBranch feat/poc -Base main -CheckProvenance
+.\powershell\dual-review.ps1 -PocBranch feat/poc -Base main
+.\powershell\dual-merge.ps1 -From feat/poc -Into main -Verify "py -3 test_yourfeature.py" -EvalK 5
+```
+</details>
 
 ---
 
 ## 🧩 Components
 
 ```
-dual-agent/
+dual-agent-craft/
 ├─ PLAN.template.md      📝 the contract template (the single shared truth)
 ├─ PROTOCOL.md          📜 8 coordination invariants (eval decides, 1 writer/space, …)
 ├─ AGENTS.md            🤝 vendor-neutral builder contract (read by Grok/Codex/Cursor/…)
-├─ ADAPTERS.md          🔌 how to plug in a 3rd model
-├─ dual-build.ps1       ⚙️  Render: Grok in an isolated worktree, adaptive-N
-├─ dual-review.ps1      💬 Assess: bounded cross-review, eval decides
-├─ dual-merge.ps1       🧪 No-Cut + pass^k merge gate
-├─ dual-view.ps1        🖥️  split-screen cockpit
-└─ lib/
-   ├─ grok-call.ps1     clean headless Grok wrapper (stdout/stderr OS-separated)
-   ├─ claude-call.ps1   clean headless Claude wrapper (+ cost telemetry)
-   ├─ local-call.ps1    zero-quota Ollama scout
-   ├─ eval-harness.ps1  pass@k / pass^k scorer (lossless early-stop)
-   ├─ import-scan.ps1   deterministic invented-package gate
-   ├─ budget-guard.ps1  fail BLOCKED before credit exhaustion
-   └─ decorrelation.ps1 cross-vendor moat telemetry
+├─ ADAPTERS.md          🔌 how to plug in a 3rd/4th model
+├─ dual-build.sh        ⚙️  Render: Grok in an isolated worktree, adaptive-N
+├─ dual-review.sh       💬 Assess: bounded cross-review, eval decides
+├─ dual-merge.sh        🧪 No-Cut + pass^k merge gate (--test-guard hook)
+├─ dual-tiebreak.sh     🎲 invariant-8 micro-probe: build both, MEASURE the winner
+├─ dual-view.sh         🖥️  tmux split-screen cockpit
+├─ lib/
+│  ├─ common.sh         shared helpers (python3-JSON, curl, locale-neutral)
+│  ├─ grok-call.sh      clean headless Grok wrapper (stdout/stderr OS-separated)
+│  ├─ claude-call.sh    clean headless Claude wrapper (+ cost telemetry)
+│  ├─ codex-call.sh     Codex 3rd vendor (real -s sandbox on Linux, -o clean result)
+│  ├─ local-call.sh     zero-quota Ollama scout
+│  ├─ eval-harness.sh   pass@k / pass^k scorer (lossless early-stop)
+│  ├─ import-scan.sh    deterministic invented-package gate
+│  ├─ test-guard.sh     deterministic invariant-7 gate (builder can't edit tests)
+│  ├─ budget-guard.sh   fail BLOCKED before credit exhaustion
+│  └─ decorrelation.sh  cross-vendor moat telemetry
+├─ tests/               🧪 49 offline bats tests (guards, gate invariants, adapters)
+└─ powershell/          🪟 the original, live-verified Windows PS-5.1 variant
 ```
 
 ---
@@ -149,9 +177,10 @@ This isn't vibes — every core decision is anchored to a source:
 
 ## ⚖️ Honest limitations
 
-- `--sandbox` for Grok is **macOS-only** today; on Windows it's compensated by worktree isolation + `--deny` + least-privilege (not a microVM).
+- `--sandbox` for Grok is **macOS-only** today; compensated by worktree isolation + `--deny` + least-privilege. On Linux, **Codex's `-s read-only|workspace-write` is a real local sandbox** — use `lib/codex-call.sh` where sandboxing matters.
 - The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
-- Built and tested on **Windows / PowerShell 5.1**; the `.ps1` scripts assume it.
+- The bash harness is tested on **Linux (bash 5.x)**; macOS should work but is unverified. The original **Windows / PowerShell 5.1** variant is preserved in `powershell/` (live-verified 2026-06).
+- The deterministic suite (49 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
 
 ---
 

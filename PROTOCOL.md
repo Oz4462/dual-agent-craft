@@ -23,9 +23,12 @@
 7. **Grok editiert NIE Tests/Verify.** In `feat/poc` schreibt Grok nur Implementierung (`src/` o.ä.),
    niemals Test-/Verify-Dateien. Sonst gamed der Builder das Gate (Tests lockern statt Code fixen).
    Tests sind für Grok untrusted-input; Claude pinnt `verify/acceptance` vor dem Build.
+   **Deterministisch erzwungen** durch `lib/test-guard.sh` (Diff-Scan, fail-closed, zero tokens) —
+   via `dual-merge.sh --test-guard` oder standalone.
 8. **Subjektives Patt → Mikro-Probe, nicht Endlos-Debatte.** Defended + nicht-eval-entscheidbare
-   Issues löst `dual-tiebreak.ps1` (Wahl c): Grok baut BEIDE Varianten isoliert, der Eval misst den
-   Sieger. Der gemessene Gewinner zählt, keine Meinung, kein Dauermediator-Mensch.
+   Issues löst `dual-tiebreak.sh` (Wahl c): Grok baut BEIDE Varianten isoliert, der Eval misst den
+   Sieger. Der gemessene Gewinner zählt, keine Meinung, kein Dauermediator-Mensch. **Implementiert**
+   (`ledger/TIEBREAK.json`; Ranking: pass^k, dann passes, dann Wall-Clock).
 
 ## Rollen-Aufteilung (wer macht was)
 
@@ -78,7 +81,21 @@ Fehler + self-preference bias; der **Eval** ist die Wahrheit, nicht die Einigung
                  defended+subjektiv  -> Tie -> dual-tiebreak.ps1 (Mikro-Probe + Eval, Wahl c)
     T  Gate      dual-merge.ps1 -EvalK K   (Merge nur bei pass^k == 1)
 
-Bausteine (verifiziert 2026-06-17): `lib\grok-call.ps1` + `lib\claude-call.ps1` (saubere
-headless-Hüllen, stdout/stderr OS-getrennt), `lib\eval-harness.ps1` (pass@k / pass^k),
-`dual-review.ps1` (bounded review), `dual-merge.ps1 -EvalK` (graded Gate). Offen: `dual-tiebreak.ps1`
-(Wahl c) + Security-Pass (`--sandbox`, Hook-Matcher `Bash|PowerShell`) + erster echter End-to-End-Build.
+Bausteine (verifiziert 2026-06-17, Windows): `grok-call` + `claude-call` (saubere headless-Hüllen,
+stdout/stderr OS-getrennt), `eval-harness` (pass@k / pass^k), `dual-review` (bounded review),
+`dual-merge --eval-k` (graded Gate).
+
+## Linux/bash-Port (v3, 2026-07-21)
+
+Die Harness ist jetzt **bash-first** (Linux/macOS); die verifizierte Windows-PS-5.1-Variante liegt
+unverändert in `powershell/`. Neu gegenüber v2:
+
+- `dual-tiebreak.sh` — Invariante 8 **implementiert** (war zuvor nur referenziert).
+- `lib/test-guard.sh` — Invariante 7 **deterministisch erzwungen** (war zuvor nur Prompt-Text).
+- `lib/codex-call.sh` — dritter Vendor (OpenAI Codex, `codex exec`): echte `-s`-Sandbox auf Linux,
+  sauberes Resultat via `-o` last-message. Adapter-Contract identisch (`ADAPTERS.md`).
+- `import-scan`-Fixes: `__future__`/relative Imports nie mehr als "invented" geflaggt;
+  Registry via `IMPORT_SCAN_REGISTRY_BASE` stubbar (offline-deterministische Tests).
+- **49 bats-Tests** (`tests/run.sh`) decken alle deterministischen Module + die 3
+  No-Cut-Invarianten + die Adapter-Contracts (gestubbte CLIs, keine billed calls) ab; CI via
+  GitHub Actions.
