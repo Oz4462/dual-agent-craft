@@ -12,7 +12,7 @@ reproduce in isolation (Reflex R2) → pin with failing regression test → smal
 safe-rewrites skill: pin behavior → slices → suite green per slice → behavior diff old vs new.
 
 ## W4 — audit
-3 parallel fresh-context reviewers (correctness / silent-failure / security via teams/agents.json) → self-verify EVERY finding → fix confirmed only → regression test per fix (`AUDIT-FIX:` naming).
+parallel fresh-context reviewers — the `reviewer` + `security` agents from teams/agents.json, each given a distinct lens (correctness / silent-failure / security) → self-verify EVERY finding → fix confirmed only → regression test per fix (`AUDIT-FIX:` naming).
 
 ## W5 — autonomous iteration
 loop-runner with declared done-condition + caps. STALLED/CAPPED hands back to human — never self-extend.
