@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# test-guard.sh — deterministic enforcement of PROTOCOL invariant 7.
+#
+# "Grok editiert NIE Tests/Verify." The builder writes only implementation; if it
+# edits the test/verify files it games the gate (loosen the test instead of fixing
+# the code). Until now this invariant was PROMPT-ONLY. This guard makes it
+# deterministic: scan the builder's diff; if it touches any test/verify file,
+# BLOCK. Zero model calls, zero tokens -- nothing here can hallucinate.
+#
+# Writes ledger/TEST-GUARD.json. Exit 0 = clean, exit 2 = BLOCKED (test edited).
+#
+# Testability: pass --diff-files "a\nb" to feed a literal newline-separated file
+# list instead of computing it from git.
+#
+# Usage:
+#   lib/test-guard.sh --poc feat/poc --base main [--extra-pattern '<regex>'] [--out FILE]
+set -uo pipefail
+_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$_HERE/common.sh"
+
+POC="feat/poc"; BASE="main"; DIFF_FILES=""; EXTRA=""; OUTFILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --poc)           POC="$2"; shift 2;;
+    --base)          BASE="$2"; shift 2;;
+    --diff-files)    DIFF_FILES="$2"; shift 2;;
+    --extra-pattern) EXTRA="$2"; shift 2;;
+    --out)           OUTFILE="$2"; shift 2;;
+    *) fail "test-guard: unknown arg '$1'";;
+  esac
+done
+
+# Default patterns for what counts as a test/verify file (case-insensitive).
+# Covers pytest, unittest, jest/vitest, go, rust, and a conventional verify/ dir.
+PATTERN='(^|/)(tests?|__tests__|spec)/|(^|/)conftest\.py$|(^|/)verify/|_test\.(py|js|ts|go|rs)$|\.test\.(js|ts|jsx|tsx)$|\.spec\.(js|ts|jsx|tsx)$|(^|/)test_[^/]+\.py$|_spec\.rb$'
+[[ -n "$EXTRA" ]] && PATTERN="$PATTERN|$EXTRA"
+
+if [[ -z "$DIFF_FILES" ]]; then
+  DIFF_FILES="$(git diff --name-only "$BASE...$POC" 2>/dev/null || true)"
+fi
+
+violations=()
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  if printf '%s' "$f" | grep -qiE "$PATTERN"; then violations+=("$f"); fi
+done <<<"$DIFF_FILES"
+
+[[ -z "$OUTFILE" ]] && { ledger="$(repo_root)/ledger"; mkdir -p "$ledger"; OUTFILE="$ledger/TEST-GUARD.json"; }
+verdict="PASS"; [[ ${#violations[@]} -gt 0 ]] && verdict="BLOCK"
+python3 - "$OUTFILE" "$BASE" "$POC" "$verdict" "$(iso_now)" "${violations[@]:-}" <<'PY'
+import sys, json
+out, base, poc, verdict, stamp = sys.argv[1:6]
+viol = [v for v in sys.argv[6:] if v]
+open(out,"w",encoding="utf-8").write(json.dumps(
+  {"base":base,"poc":poc,"verdict":verdict,"violations":viol,"stamp":stamp}, indent=2))
+PY
+
+if [[ ${#violations[@]} -gt 0 ]]; then
+  printf '%stest-guard: BLOCK -- builder touched test/verify files (invariant 7):%s\n' "$C_RED" "$C_RESET"
+  for v in "${violations[@]}"; do printf '%s  ! %s%s\n' "$C_RED" "$v" "$C_RESET"; done
+  exit 2
+fi
+ok "test-guard: PASS -- no test/verify files modified by the builder."
+exit 0
