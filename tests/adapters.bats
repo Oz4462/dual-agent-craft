@@ -1,0 +1,81 @@
+#!/usr/bin/env bats
+# Vendor adapters — contract shape via stubbed CLIs (no billed calls, no network).
+# Every adapter must print {exit_code, text, json_log, stdout_log} on stdout.
+
+load helpers/common
+
+setup() {
+  setup_scratch
+  install_fake_clis
+  PROMPT="$SCRATCH/prompt.txt"
+  echo "do the thing" > "$PROMPT"
+}
+teardown() { teardown_scratch; }
+
+text_of()  { python3 -c 'import sys,json;print(json.load(sys.stdin)["text"].strip())'; }
+exit_of()  { python3 -c 'import sys,json;print(json.load(sys.stdin)["exit_code"])'; }
+
+@test "grok-call: contract JSON with extracted text; noise stays out of result" {
+  run "$HARNESS_ROOT/lib/grok-call.sh" --prompt-file "$PROMPT" --tag t
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | text_of)" = "GROK_FAKE_OK" ]
+  [[ "$output" != *AuthorizationRequired* ]]
+}
+
+@test "claude-call: contract JSON + SPEND.jsonl cost telemetry" {
+  rm -f "$HARNESS_ROOT/ledger/SPEND.jsonl.bak"
+  [ -f "$HARNESS_ROOT/ledger/SPEND.jsonl" ] && cp "$HARNESS_ROOT/ledger/SPEND.jsonl" "$HARNESS_ROOT/ledger/SPEND.jsonl.bak"
+  run "$HARNESS_ROOT/lib/claude-call.sh" --prompt-file "$PROMPT" --tag t
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | text_of)" = "CLAUDE_FAKE_OK" ]
+  tail -1 "$HARNESS_ROOT/ledger/SPEND.jsonl" | grep -q '"cost_usd": 0.13'
+  # restore ledger state
+  if [ -f "$HARNESS_ROOT/ledger/SPEND.jsonl.bak" ]; then
+    mv "$HARNESS_ROOT/ledger/SPEND.jsonl.bak" "$HARNESS_ROOT/ledger/SPEND.jsonl"
+  else
+    rm -f "$HARNESS_ROOT/ledger/SPEND.jsonl"
+  fi
+}
+
+@test "codex-call: clean text via -o last-message file" {
+  run "$HARNESS_ROOT/lib/codex-call.sh" --prompt-file "$PROMPT" --tag t
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | text_of)" = "CODEX_FAKE_OK" ]
+}
+
+@test "missing prompt file -> BLOCKED exit 1 (all adapters)" {
+  for a in grok-call claude-call codex-call local-call; do
+    run "$HARNESS_ROOT/lib/$a.sh" --prompt-file "$SCRATCH/nope.txt"
+    [ "$status" -eq 1 ]
+  done
+}
+
+@test "claude-call: is_error=true in response -> non-zero exit" {
+  cat > "$FAKEBIN/claude" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+echo '{"type":"result","result":"boom","is_error":true}'
+EOF
+  chmod +x "$FAKEBIN/claude"
+  run "$HARNESS_ROOT/lib/claude-call.sh" --prompt-file "$PROMPT" --tag t
+  [ "$status" -ne 0 ]
+}
+
+@test "local-call: unreachable Ollama -> honest BLOCKED exit 1" {
+  run "$HARNESS_ROOT/lib/local-call.sh" --prompt-file "$PROMPT" --endpoint "http://127.0.0.1:59999/api/chat" --timeout 2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *BLOCKED* ]]
+}
+
+@test "grok-call dry-run makes no call and exits 0" {
+  rm -f "$FAKEBIN/grok.called"
+  cat > "$FAKEBIN/grok" <<EOF
+#!/usr/bin/env bash
+touch "$FAKEBIN/grok.called"
+echo '{}'
+EOF
+  chmod +x "$FAKEBIN/grok"
+  run "$HARNESS_ROOT/lib/grok-call.sh" --prompt-file "$PROMPT" --dry-run
+  [ "$status" -eq 0 ]
+  [ ! -f "$FAKEBIN/grok.called" ]
+}

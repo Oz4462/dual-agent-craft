@@ -20,3 +20,4 @@ mcps/
 Thumbs.db
 .DS_Store
 .vscode/
+tests/vendor/

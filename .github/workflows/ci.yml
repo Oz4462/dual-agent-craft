@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: Syntax check (bash -n)
+        run: |
+          for f in *.sh lib/*.sh tests/run.sh; do bash -n "$f"; done
+      - name: ShellCheck (advisory)
+        run: |
+          sudo apt-get install -y -qq shellcheck || true
+          shellcheck -S error *.sh lib/*.sh || true
+      - name: Run test suite
+        run: tests/run.sh
