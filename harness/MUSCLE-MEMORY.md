@@ -1,4 +1,4 @@
-# Muscle Memory — 33 earned lessons
+# Muscle Memory — 34 earned lessons
 
 > Instant recall before touching code. Each entry is one burned lesson: many were
 > paid for in THIS repo (marked ⚡ = found live here), the rest in prior projects.
@@ -84,3 +84,6 @@
     interfaces don't.
 33. **Write the shift note while it hurts.** The lesson you don't record in the
     same session is the lesson you pay for twice.
+34. ⚡ **Guard by capability, not by spelling.** An adversary reorders/renames
+    flags (`rm -r -f` = `rm --recursive --force` = `rm -rf`); a fixed-string
+    reflex is a weak reflex. Detect the capability, then scope the target.
