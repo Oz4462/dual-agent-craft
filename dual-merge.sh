@@ -24,7 +24,8 @@ while [[ $# -gt 0 ]]; do
     --from)       FROM="${2:?value required for $1}"; shift 2;;
     --into)       INTO="${2:?value required for $1}"; shift 2;;
     --verify)     VERIFY="${2:?value required for $1}"; shift 2;;
-    --eval-k)     EVAL_K="${2:?value required for $1}"; shift 2;;
+    --eval-k)     EVAL_K="${2:?value required for $1}"; shift 2
+                  [[ "$EVAL_K" =~ ^[0-9]+$ ]] || { echo "BLOCKED: --eval-k must be a positive integer, got '$EVAL_K' (a typo would silently downgrade the pass^k gate to one run)." >&2; exit 1; };;
     --test-guard) TESTGUARD=true; shift;;
     --force)      FORCE=true; shift;;
     *) fail "dual-merge: unknown arg '$1'";;

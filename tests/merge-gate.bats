@@ -101,3 +101,11 @@ EOF
   fi
   cd - >/dev/null
 }
+
+@test "AUDIT-P1: non-numeric --eval-k is BLOCKED (no silent gate downgrade)" {
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-merge.sh" --from feat/harden --into main --eval-k abc --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"positive integer"* ]]
+  cd - >/dev/null
+}

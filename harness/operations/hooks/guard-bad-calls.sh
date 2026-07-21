@@ -51,8 +51,13 @@ re_fork=':\(\)\{[[:space:]]*:\|:&[[:space:]]*\};'
 re_fpush1="git$sp+push$sp+[^;|]*(--force|-f)($sp)[^;|]*(main|master)"
 re_fpush2="git$sp+push$sp+[^;|]*(main|master)$sp[^;|]*(--force|-f)($sp|\$)"
 re_reset="git$sp+reset$sp+--hard$sp+origin/"
+# pipe-to-shell: classic `curl … | sh` AND command-substitution `sh -c "$(curl …)"`
+# / `eval "$(wget …)"` (audit P1: substitution form previously slipped through).
 re_pipe_sh="(curl|wget)$sp[^;|]*\|[[:space:]]*(ba|z|da)?sh"
-re_secrets="(cat|less|head|tail)$sp[^;|]*(\.env($sp|\$|\.)|id_rsa|id_ed25519|\.pem($sp|\$)|auth\.json)"
+re_subst_sh="(eval|(ba|z|da)?sh$sp+-c)$sp+[^;]*\\\$\((curl|wget)"
+# secret-read: extend beyond cat/less/head/tail to the common dumpers + copy/encode
+# (xxd/od/strings/base64/cp/printenv) — capability, not a fixed tool (audit P1).
+re_secrets="(cat|less|more|head|tail|xxd|od|strings|base64|cp|nl|tac)$sp[^;|]*(\.env($sp|\$|\.)|id_rsa|id_ed25519|\.pem($sp|\$)|auth\.json)"
 re_skipperm="dangerously-skip-permissions"
 re_secret_files='(^|/)(\.env|id_rsa|id_ed25519|[^/]*\.pem|auth\.json)$'
 
@@ -65,6 +70,7 @@ if [[ "$tool" == "Bash" ]]; then
   [[ "$cmd" =~ $re_fpush2 ]]    && block "force-push to main/master" "$cmd"
   [[ "$cmd" =~ $re_reset ]]     && block "hard reset onto remote (silent local-work loss)" "$cmd"
   [[ "$cmd" =~ $re_pipe_sh ]]   && block "pipe-to-shell install (use the vetted bootstrap instead)" "$cmd"
+  [[ "$cmd" =~ $re_subst_sh ]]  && block "command-substitution shell exec of a download (curl/wget in \$(...))" "$cmd"
   [[ "$cmd" =~ $re_secrets ]]   && block "printing secret material to the transcript" "$cmd"
   [[ "$cmd" =~ $re_skipperm ]]  && block "attempt to bypass the permission system" "$cmd"
 fi

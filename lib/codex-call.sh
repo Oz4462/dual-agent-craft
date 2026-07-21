@@ -49,14 +49,20 @@ outfile="$logdir/$TAG-$stamp.out.log"      # raw stdout (JSONL if --json)
 errfile="$logdir/$TAG-$stamp.err.log"
 lastmsg="$logdir/$TAG-$stamp.last.txt"     # clean final answer (-o)
 
+# Full-auto = approval-free but STILL SANDBOXED (audit P1: the old
+# --dangerously-bypass-approvals-and-sandbox flag overrode -s and silently voided
+# the sandbox this adapter advertises). `codex exec` is already non-interactive;
+# a read-only sandbox can't build, so full-auto upgrades to the MINIMAL writable
+# sandbox — never a bypass. A genuinely unsandboxed run is reachable only by the
+# caller explicitly passing --sandbox danger-full-access (visible in argv).
+eff_sandbox="$SANDBOX"
+[[ "$FULL_AUTO" == true && "$eff_sandbox" == "read-only" ]] && eff_sandbox="workspace-write"
+
 # `codex exec` runs non-interactively. -C sets the working root; --skip-git-repo-check
 # lets us run in isolated worktrees without a fresh init. Prompt via stdin ('-').
-args=(exec --cd "$CWD" --skip-git-repo-check -o "$lastmsg" -s "$SANDBOX" --color never)
+args=(exec --cd "$CWD" --skip-git-repo-check -o "$lastmsg" -s "$eff_sandbox" --color never)
 [[ -n "$MODEL" ]] && args+=(-m "$MODEL")
 [[ "$JSONL" == true ]] && args+=(--json)
-# Full-auto for a sandboxed builder role: bypass approval prompts (still sandboxed
-# unless the caller explicitly chose danger-full-access).
-[[ "$FULL_AUTO" == true ]] && args+=(--dangerously-bypass-approvals-and-sandbox)
 args+=(-)   # read prompt from stdin
 
 if [[ "$DRYRUN" == true ]]; then

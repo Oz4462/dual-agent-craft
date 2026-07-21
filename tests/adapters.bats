@@ -99,3 +99,9 @@ STUB
   [ -f "$EXT" ]
   grep -q '"cost_usd": 0.13' "$EXT"
 }
+
+@test "codex-call(P1): --full-auto never emits a sandbox-bypass flag (argv check)" {
+  out="$("$HARNESS_ROOT/lib/codex-call.sh" --prompt-file "$PROMPT" --full-auto --dry-run 2>&1)"
+  [[ "$out" != *dangerously* ]]
+  [[ "$out" == *"workspace-write"* ]]
+}
