@@ -22,13 +22,13 @@ PROMPT_FILE=""; MODEL="qwen2.5:7b"; TEMP="0.2"; JSONFMT=false
 ENDPOINT="http://localhost:11434/api/chat"; TIMEOUT=120; TAG="local"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prompt-file) PROMPT_FILE="$2"; shift 2;;
-    --model)       MODEL="$2"; shift 2;;
-    --temperature) TEMP="$2"; shift 2;;
+    --prompt-file) PROMPT_FILE="${2:?value required for $1}"; shift 2;;
+    --model)       MODEL="${2:?value required for $1}"; shift 2;;
+    --temperature) TEMP="${2:?value required for $1}"; shift 2;;
     --json)        JSONFMT=true; shift;;
-    --endpoint)    ENDPOINT="$2"; shift 2;;
-    --timeout)     TIMEOUT="$2"; shift 2;;
-    --tag)         TAG="$2"; shift 2;;
+    --endpoint)    ENDPOINT="${2:?value required for $1}"; shift 2;;
+    --timeout)     TIMEOUT="${2:?value required for $1}"; shift 2;;
+    --tag)         TAG="${2:?value required for $1}"; shift 2;;
     *) fail "local-call: unknown arg '$1'";;
   esac
 done

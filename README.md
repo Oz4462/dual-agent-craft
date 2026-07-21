@@ -181,7 +181,7 @@ This isn't vibes — every core decision is anchored to a source:
 - The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
 - The bash harness is tested on **Linux (bash 5.x)**; macOS should work but is unverified. The original **Windows / PowerShell 5.1** variant is preserved in `powershell/` (live-verified 2026-06).
 - The deterministic suite (66 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
-- `ledger/SPEND.jsonl` (budget telemetry) is a plain, unsigned file that code running during `--verify` could locate via `git rev-parse --git-common-dir` and tamper with — the budget guard is a *cost-control convenience*, not a security boundary. Treat verify-time code as trusted or move the ledger outside any git tree.
+- `ledger/SPEND.jsonl` (budget telemetry) is a plain, unsigned file — the budget guard is a *cost-control convenience*, not a security boundary. By default it lives in-repo, where code running during `--verify` could locate it via `git rev-parse --git-common-dir` and tamper with it; set `DUAL_AGENT_SPEND_FILE=~/.local/state/dual-agent/SPEND.jsonl` (honoured by both writer and guard) to move it outside any git tree.
 
 ---
 

@@ -22,11 +22,11 @@ source "$_HERE/common.sh"
 POC="feat/poc"; BASE="main"; DIFF_FILES=""; EXTRA=""; OUTFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --poc)           POC="$2"; shift 2;;
-    --base)          BASE="$2"; shift 2;;
-    --diff-files)    DIFF_FILES="$2"; shift 2;;
-    --extra-pattern) EXTRA="$2"; shift 2;;
-    --out)           OUTFILE="$2"; shift 2;;
+    --poc)           POC="${2:?value required for $1}"; shift 2;;
+    --base)          BASE="${2:?value required for $1}"; shift 2;;
+    --diff-files)    DIFF_FILES="${2:?value required for $1}"; shift 2;;
+    --extra-pattern) EXTRA="${2:?value required for $1}"; shift 2;;
+    --out)           OUTFILE="${2:?value required for $1}"; shift 2;;
     *) fail "test-guard: unknown arg '$1'";;
   esac
 done

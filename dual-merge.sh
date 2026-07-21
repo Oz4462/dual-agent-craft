@@ -21,10 +21,10 @@ source "$_HERE/lib/common.sh"
 FROM="feat/harden"; INTO="main"; VERIFY=""; EVAL_K=1; FORCE=false; TESTGUARD=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --from)       FROM="$2"; shift 2;;
-    --into)       INTO="$2"; shift 2;;
-    --verify)     VERIFY="$2"; shift 2;;
-    --eval-k)     EVAL_K="$2"; shift 2;;
+    --from)       FROM="${2:?value required for $1}"; shift 2;;
+    --into)       INTO="${2:?value required for $1}"; shift 2;;
+    --verify)     VERIFY="${2:?value required for $1}"; shift 2;;
+    --eval-k)     EVAL_K="${2:?value required for $1}"; shift 2;;
     --test-guard) TESTGUARD=true; shift;;
     --force)      FORCE=true; shift;;
     *) fail "dual-merge: unknown arg '$1'";;

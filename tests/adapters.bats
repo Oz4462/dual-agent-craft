@@ -91,3 +91,11 @@ STUB
   [ "$status" -ne 0 ]
   [ "$(printf '%s' "$output" | exit_of)" != "0" ]
 }
+
+@test "AUDIT-FIX(low): claude-call writes cost to DUAL_AGENT_SPEND_FILE when set" {
+  EXT="$SCRATCH/outside/SPEND.jsonl"
+  DUAL_AGENT_SPEND_FILE="$EXT" run "$HARNESS_ROOT/lib/claude-call.sh" --prompt-file "$PROMPT" --tag t
+  [ "$status" -eq 0 ]
+  [ -f "$EXT" ]
+  grep -q '"cost_usd": 0.13' "$EXT"
+}

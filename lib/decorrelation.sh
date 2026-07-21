@@ -18,8 +18,8 @@ source "$_HERE/common.sh"
 REVIEW=""; WARN_BELOW="0.15"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --review)     REVIEW="$2"; shift 2;;
-    --warn-below) WARN_BELOW="$2"; shift 2;;
+    --review)     REVIEW="${2:?value required for $1}"; shift 2;;
+    --warn-below) WARN_BELOW="${2:?value required for $1}"; shift 2;;
     *) fail "decorrelation: unknown arg '$1'";;
   esac
 done

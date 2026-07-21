@@ -27,12 +27,12 @@ source "$_HERE/common.sh"
 PROMPT_FILE=""; MODEL=""; SYSTEM_PROMPT=""; MAX_BUDGET="0"; TAG="claude"; DISALLOWED_TOOLS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prompt-file)      PROMPT_FILE="$2"; shift 2;;
-    --model)            MODEL="$2"; shift 2;;
-    --system-prompt)    SYSTEM_PROMPT="$2"; shift 2;;
-    --max-budget-usd)   MAX_BUDGET="$2"; shift 2;;
-    --disallowed-tools) DISALLOWED_TOOLS="$2"; shift 2;;  # least-privilege for tool-free roles (ASSESS)
-    --tag)              TAG="$2"; shift 2;;
+    --prompt-file)      PROMPT_FILE="${2:?value required for $1}"; shift 2;;
+    --model)            MODEL="${2:?value required for $1}"; shift 2;;
+    --system-prompt)    SYSTEM_PROMPT="${2:?value required for $1}"; shift 2;;
+    --max-budget-usd)   MAX_BUDGET="${2:?value required for $1}"; shift 2;;
+    --disallowed-tools) DISALLOWED_TOOLS="${2:?value required for $1}"; shift 2;;  # least-privilege for tool-free roles (ASSESS)
+    --tag)              TAG="${2:?value required for $1}"; shift 2;;
     *) fail "claude-call: unknown arg '$1'";;
   esac
 done
@@ -62,10 +62,17 @@ cost="$(json_field "$outfile" total_cost_usd)"
 # because callers read the contract JSON, not this wrapper's own $?.
 [[ "$is_error" == "true" && "$exit_code" == 0 ]] && exit_code=1
 
-# Cost telemetry -> SPEND.jsonl (feeds budget-guard).
+# Cost telemetry -> SPEND.jsonl (feeds budget-guard). DUAL_AGENT_SPEND_FILE
+# lets you move the ledger OUTSIDE any git tree (audit: verify-time code can
+# locate the in-repo default via `git rev-parse --git-common-dir` and tamper).
 if [[ -n "$cost" ]]; then
-  ledger="$(repo_root)/ledger"; mkdir -p "$ledger"
-  python3 - "$ledger/SPEND.jsonl" "$stamp" "$TAG" "$MODEL" "$cost" <<'PY'
+  spend_file="${DUAL_AGENT_SPEND_FILE:-}"
+  if [[ -z "$spend_file" ]]; then
+    ledger="$(repo_root)/ledger"; mkdir -p "$ledger"; spend_file="$ledger/SPEND.jsonl"
+  else
+    mkdir -p "$(dirname "$spend_file")"
+  fi
+  python3 - "$spend_file" "$stamp" "$TAG" "$MODEL" "$cost" <<'PY'
 import sys, json
 out, stamp, tag, model, cost = sys.argv[1:6]
 open(out,"a",encoding="utf-8").write(json.dumps({"stamp":stamp,"tag":tag,"model":model,"cost_usd":float(cost)})+"\n")

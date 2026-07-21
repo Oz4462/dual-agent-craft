@@ -24,15 +24,15 @@ PLAN="./PLAN.md"; BASE="main"; VERIFY=""; A_DESC=""; B_DESC=""
 ISSUE_ID="tie"; EVAL_K=5; MAX_TURNS=40; MODEL=""; DRYRUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)       PLAN="$2"; shift 2;;
-    --base)       BASE="$2"; shift 2;;
-    --verify)     VERIFY="$2"; shift 2;;
-    --approach-a) A_DESC="$2"; shift 2;;
-    --approach-b) B_DESC="$2"; shift 2;;
-    --issue-id)   ISSUE_ID="$2"; shift 2;;
-    --eval-k)     EVAL_K="$2"; shift 2;;
-    --max-turns)  MAX_TURNS="$2"; shift 2;;
-    --model)      MODEL="$2"; shift 2;;
+    --plan)       PLAN="${2:?value required for $1}"; shift 2;;
+    --base)       BASE="${2:?value required for $1}"; shift 2;;
+    --verify)     VERIFY="${2:?value required for $1}"; shift 2;;
+    --approach-a) A_DESC="${2:?value required for $1}"; shift 2;;
+    --approach-b) B_DESC="${2:?value required for $1}"; shift 2;;
+    --issue-id)   ISSUE_ID="${2:?value required for $1}"; shift 2;;
+    --eval-k)     EVAL_K="${2:?value required for $1}"; shift 2;;
+    --max-turns)  MAX_TURNS="${2:?value required for $1}"; shift 2;;
+    --model)      MODEL="${2:?value required for $1}"; shift 2;;
     --dry-run)    DRYRUN=true; shift;;
     *) fail "dual-tiebreak: unknown arg '$1'";;
   esac

@@ -20,14 +20,14 @@ PLAN="./PLAN.md"; VARIANTS=3; BRANCH="feat/poc"; INTO="main"; MODEL=""
 MAX_TURNS=40; ADAPTIVE=false; VERIFY=""; DRYRUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)      PLAN="$2"; shift 2;;
-    --variants)  VARIANTS="$2"; shift 2;;
-    --branch)    BRANCH="$2"; shift 2;;
-    --into)      INTO="$2"; shift 2;;
-    --model)     MODEL="$2"; shift 2;;
-    --max-turns) MAX_TURNS="$2"; shift 2;;
+    --plan)      PLAN="${2:?value required for $1}"; shift 2;;
+    --variants)  VARIANTS="${2:?value required for $1}"; shift 2;;
+    --branch)    BRANCH="${2:?value required for $1}"; shift 2;;
+    --into)      INTO="${2:?value required for $1}"; shift 2;;
+    --model)     MODEL="${2:?value required for $1}"; shift 2;;
+    --max-turns) MAX_TURNS="${2:?value required for $1}"; shift 2;;
     --adaptive)  ADAPTIVE=true; shift;;
-    --verify)    VERIFY="$2"; shift 2;;
+    --verify)    VERIFY="${2:?value required for $1}"; shift 2;;
     --dry-run)   DRYRUN=true; shift;;
     *) fail "dual-build: unknown arg '$1'";;
   esac

@@ -28,16 +28,16 @@ POC="feat/poc"; BASE="main"; DIFF_TEXT=""; ALLOW=""; ECO="auto"
 CHECK_PROV=false; SUSPECT_AGE=30; BLOCK_SUSPECT=false; OUTFILE=""; TIMEOUT=12
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --poc)            POC="$2"; shift 2;;
-    --base)           BASE="$2"; shift 2;;
-    --diff-text)      DIFF_TEXT="$2"; shift 2;;
-    --allow)          ALLOW="$2"; shift 2;;
-    --ecosystem)      ECO="$2"; shift 2;;
+    --poc)            POC="${2:?value required for $1}"; shift 2;;
+    --base)           BASE="${2:?value required for $1}"; shift 2;;
+    --diff-text)      DIFF_TEXT="${2:?value required for $1}"; shift 2;;
+    --allow)          ALLOW="${2:?value required for $1}"; shift 2;;
+    --ecosystem)      ECO="${2:?value required for $1}"; shift 2;;
     --check-provenance) CHECK_PROV=true; shift;;
-    --suspect-age-days) SUSPECT_AGE="$2"; shift 2;;
+    --suspect-age-days) SUSPECT_AGE="${2:?value required for $1}"; shift 2;;
     --block-suspect)  BLOCK_SUSPECT=true; shift;;
-    --timeout)        TIMEOUT="$2"; shift 2;;
-    --out)            OUTFILE="$2"; shift 2;;
+    --timeout)        TIMEOUT="${2:?value required for $1}"; shift 2;;
+    --out)            OUTFILE="${2:?value required for $1}"; shift 2;;
     *) fail "import-scan: unknown arg '$1'";;
   esac
 done

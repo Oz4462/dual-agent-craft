@@ -20,11 +20,11 @@ source "$_HERE/common.sh"
 VERIFY=""; K=5; CWD="$(pwd)"; THRESHOLD="1.0"; OUTFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --verify)    VERIFY="$2"; shift 2;;
-    --k)         K="$2"; shift 2;;
-    --cwd)       CWD="$2"; shift 2;;
-    --threshold) THRESHOLD="$2"; shift 2;;
-    --out)       OUTFILE="$2"; shift 2;;
+    --verify)    VERIFY="${2:?value required for $1}"; shift 2;;
+    --k)         K="${2:?value required for $1}"; shift 2;;
+    --cwd)       CWD="${2:?value required for $1}"; shift 2;;
+    --threshold) THRESHOLD="${2:?value required for $1}"; shift 2;;
+    --out)       OUTFILE="${2:?value required for $1}"; shift 2;;
     *) fail "eval-harness: unknown arg '$1'";;
   esac
 done

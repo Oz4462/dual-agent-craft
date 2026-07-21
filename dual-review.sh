@@ -22,10 +22,10 @@ source "$_HERE/lib/common.sh"
 PLAN="./PLAN.md"; POC="feat/poc"; BASE="main"; MODEL=""; DRYRUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)   PLAN="$2"; shift 2;;
-    --poc)    POC="$2"; shift 2;;
-    --base)   BASE="$2"; shift 2;;
-    --model)  MODEL="$2"; shift 2;;
+    --plan)   PLAN="${2:?value required for $1}"; shift 2;;
+    --poc)    POC="${2:?value required for $1}"; shift 2;;
+    --base)   BASE="${2:?value required for $1}"; shift 2;;
+    --model)  MODEL="${2:?value required for $1}"; shift 2;;
     --dry-run) DRYRUN=true; shift;;
     *) fail "dual-review: unknown arg '$1'";;
   esac

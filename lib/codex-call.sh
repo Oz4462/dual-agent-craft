@@ -29,13 +29,13 @@ PROMPT_FILE=""; CWD="$(pwd)"; MODEL=""; SANDBOX="read-only"
 FULL_AUTO=false; JSONL=false; TAG="codex"; DRYRUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prompt-file) PROMPT_FILE="$2"; shift 2;;
-    --cwd)         CWD="$2"; shift 2;;
-    --model)       MODEL="$2"; shift 2;;
-    --sandbox)     SANDBOX="$2"; shift 2;;
+    --prompt-file) PROMPT_FILE="${2:?value required for $1}"; shift 2;;
+    --cwd)         CWD="${2:?value required for $1}"; shift 2;;
+    --model)       MODEL="${2:?value required for $1}"; shift 2;;
+    --sandbox)     SANDBOX="${2:?value required for $1}"; shift 2;;
     --full-auto)   FULL_AUTO=true; shift;;
     --json)        JSONL=true; shift;;
-    --tag)         TAG="$2"; shift 2;;
+    --tag)         TAG="${2:?value required for $1}"; shift 2;;
     --dry-run)     DRYRUN=true; shift;;
     *) fail "codex-call: unknown arg '$1'";;
   esac

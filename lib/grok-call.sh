@@ -24,16 +24,16 @@ PROMPT_FILE=""; CWD="$(pwd)"; MAX_TURNS=40; BEST_OF_N=1; MODEL=""; SANDBOX=""
 ALWAYS_APPROVE=false; CHECK=false; TAG="grok"; DRYRUN=false; DENY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prompt-file)    PROMPT_FILE="$2"; shift 2;;
-    --cwd)            CWD="$2"; shift 2;;
-    --max-turns)      MAX_TURNS="$2"; shift 2;;
-    --best-of-n)      BEST_OF_N="$2"; shift 2;;
-    --model)          MODEL="$2"; shift 2;;
-    --sandbox)        SANDBOX="$2"; shift 2;;
+    --prompt-file)    PROMPT_FILE="${2:?value required for $1}"; shift 2;;
+    --cwd)            CWD="${2:?value required for $1}"; shift 2;;
+    --max-turns)      MAX_TURNS="${2:?value required for $1}"; shift 2;;
+    --best-of-n)      BEST_OF_N="${2:?value required for $1}"; shift 2;;
+    --model)          MODEL="${2:?value required for $1}"; shift 2;;
+    --sandbox)        SANDBOX="${2:?value required for $1}"; shift 2;;
     --always-approve) ALWAYS_APPROVE=true; shift;;
     --check)          CHECK=true; shift;;
     --deny)           DENY+=("$2"); shift 2;;
-    --tag)            TAG="$2"; shift 2;;
+    --tag)            TAG="${2:?value required for $1}"; shift 2;;
     --dry-run)        DRYRUN=true; shift;;
     *) fail "grok-call: unknown arg '$1'";;
   esac

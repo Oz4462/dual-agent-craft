@@ -17,14 +17,16 @@ source "$_HERE/common.sh"
 CAP=100; SAFETY=0.9; ESTIMATE=0; SPEND_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cap)        CAP="$2"; shift 2;;
-    --safety)     SAFETY="$2"; shift 2;;
-    --estimate)   ESTIMATE="$2"; shift 2;;
-    --spend-file) SPEND_FILE="$2"; shift 2;;
+    --cap)        CAP="${2:?value required for $1}"; shift 2;;
+    --safety)     SAFETY="${2:?value required for $1}"; shift 2;;
+    --estimate)   ESTIMATE="${2:?value required for $1}"; shift 2;;
+    --spend-file) SPEND_FILE="${2:?value required for $1}"; shift 2;;
     *) fail "budget-guard: unknown arg '$1'";;
   esac
 done
-[[ -z "$SPEND_FILE" ]] && SPEND_FILE="$(repo_root)/ledger/SPEND.jsonl"
+# Same resolution order as the writer (claude-call.sh): explicit flag >
+# DUAL_AGENT_SPEND_FILE env (ledger outside the git tree) > in-repo default.
+[[ -z "$SPEND_FILE" ]] && SPEND_FILE="${DUAL_AGENT_SPEND_FILE:-$(repo_root)/ledger/SPEND.jsonl}"
 
 MONTH="$(date -u +%Y%m)"
 # The whole computation is wrapped so ONE malformed ledger line can neither

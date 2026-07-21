@@ -61,3 +61,18 @@ mk_spend() { # args: lines...
   [ "$status" -eq 0 ]
   [[ "$output" == *"spent=2.00"* ]]
 }
+
+@test "AUDIT-FIX(low): DUAL_AGENT_SPEND_FILE env moves the ledger for reader + writer" {
+  # reader side
+  EXT="$SCRATCH/outside/SPEND.jsonl"; mkdir -p "$SCRATCH/outside"
+  printf '{"stamp":"%s01-000000","cost_usd":1.50}\n' "$MONTH" > "$EXT"
+  DUAL_AGENT_SPEND_FILE="$EXT" run "$HARNESS_ROOT/lib/budget-guard.sh" --cap 100
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spent=1.50"* ]]
+}
+
+@test "AUDIT-FIX(low): missing flag value fails with a clear message, not raw unbound" {
+  run "$HARNESS_ROOT/lib/budget-guard.sh" --cap
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"value required for --cap"* ]]
+}

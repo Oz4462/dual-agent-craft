@@ -33,9 +33,17 @@ while true; do
       cur="$log"; pos=0; waited=false
       printf '\n--- new build: %s ---\n' "$(basename "$log")"
     fi
-    size=$(stat -c%s "$cur" 2>/dev/null || echo 0)
+    # Audit fix: a failing stat (file rotated/removed mid-read) must not freeze
+    # the pane silently — warn once and re-scan for the next log.
+    if ! size=$(stat -c%s "$cur" 2>/dev/null); then
+      printf '\n[watch-grok] log vanished (%s) — waiting for the next build ...\n' "$(basename "$cur")" >&2
+      baseline["$cur"]=1; cur=""; pos=0
+      continue
+    fi
     if [[ "$size" -gt "$pos" ]]; then
-      dd if="$cur" bs=1 skip="$pos" count=$((size - pos)) 2>/dev/null
+      if ! dd if="$cur" bs=1 skip="$pos" count=$((size - pos)) 2>/dev/null; then
+        printf '\n[watch-grok] read error on %s — retrying ...\n' "$(basename "$cur")" >&2
+      fi
       pos=$size
     fi
   elif [[ "$waited" == false ]]; then
