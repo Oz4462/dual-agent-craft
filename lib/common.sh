@@ -32,12 +32,13 @@ else
   C_RED=''; C_GREEN=''; C_YELLOW=''; C_CYAN=''; C_DIM=''; C_RESET=''
 fi
 
-log()  { printf '%s\n' "$*"; }
-info() { printf '%s%s%s\n' "$C_CYAN" "$*" "$C_RESET"; }
-ok()   { printf '%s%s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
-warn() { printf '%s%s%s\n' "$C_YELLOW" "$*" "$C_RESET" >&2; }
+# %b so "\n" in messages renders as a newline (log "\nDone" etc.).
+log()  { printf '%b\n' "$*"; }
+info() { printf '%s%b%s\n' "$C_CYAN" "$*" "$C_RESET"; }
+ok()   { printf '%s%b%s\n' "$C_GREEN" "$*" "$C_RESET"; }
+warn() { printf '%s%b%s\n' "$C_YELLOW" "$*" "$C_RESET" >&2; }
 # fail: print "BLOCKED: msg" in red and exit with the given code (default 1).
-fail() { printf '%sBLOCKED: %s%s\n' "$C_RED" "$*" "$C_RESET" >&2; exit "${_FAIL_CODE:-1}"; }
+fail() { printf '%sBLOCKED: %b%s\n' "$C_RED" "$*" "$C_RESET" >&2; exit "${_FAIL_CODE:-1}"; }
 fail_code() { _FAIL_CODE="$1"; shift; fail "$@"; }
 
 # --- Repo / paths ----------------------------------------------------------
@@ -114,6 +115,40 @@ if isinstance(cur, bool):
 elif cur is not None:
     print(cur)
 PY
+}
+
+# json_field_stdin <dotted.path>: like json_field but reads the JSON from STDIN.
+# NOTE: json_field's program arrives via a stdin-heredoc, so `json_field
+# /dev/stdin` can NEVER see piped data (the heredoc owns fd0 — it only appeared
+# to work depending on bash's heredoc pipe-vs-tmpfile choice). This variant uses
+# `python3 -c` so the caller's pipe stays on stdin. Use it for `cmd | ... key`.
+json_field_stdin() {
+  python3 -c '
+import sys, json
+dotted = sys.argv[1]
+raw = sys.stdin.read()
+try:
+    obj = json.loads(raw)
+except Exception:
+    obj = None
+    for line in reversed([l for l in raw.splitlines() if l.strip()]):
+        try:
+            obj = json.loads(line); break
+        except Exception:
+            continue
+if obj is None:
+    sys.exit(0)
+cur = obj
+for part in dotted.split("."):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        sys.exit(0)
+if isinstance(cur, bool):
+    print("true" if cur else "false")
+elif cur is not None:
+    print(cur)
+' "$1"
 }
 
 # json_valid <file>: exit 0 if the file parses as a JSON object/array.

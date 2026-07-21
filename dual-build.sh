@@ -103,7 +103,7 @@ effective_n="$VARIANTS"
 [[ "$ADAPTIVE" == true && "$VARIANTS" -gt 1 ]] && effective_n=1
 log "Render   : best-of-$effective_n$([[ "$ADAPTIVE" == true ]] && echo ' (adaptive: N=1 first)')"
 result="$(render "$effective_n")"
-grok_exit="$(printf '%s' "$result" | json_field /dev/stdin exit_code 2>/dev/null || echo 1)"
+grok_exit="$(printf '%s' "$result" | json_field_stdin exit_code 2>/dev/null || echo 1)"
 grok_exit="${grok_exit:-1}"
 printf '%s' "$result" | python3 -c "import sys,json;d=json.load(sys.stdin);print('\nGrok result (noise-free):');print(d['text'].strip()[:2000])" 2>/dev/null || true
 
@@ -113,7 +113,7 @@ if [[ "$ADAPTIVE" == true && "$VARIANTS" -gt 1 && -n "$VERIFY" && "$grok_exit" =
   else
     warn "Adaptive : N=1 failed acceptance ($VERIFY) -> escalating to best-of-$VARIANTS"
     result="$(render "$VARIANTS")"
-    grok_exit="$(printf '%s' "$result" | json_field /dev/stdin exit_code 2>/dev/null || echo 1)"
+    grok_exit="$(printf '%s' "$result" | json_field_stdin exit_code 2>/dev/null || echo 1)"
   fi
 fi
 
@@ -122,9 +122,13 @@ info "\n=== Render done (grok exit=$grok_exit) ==="
 log "Worktree: $wtpath"
 # strip harness/session artifacts Grok's run leaves behind (NOT part of the POC;
 # else they pollute the review diff — live-test found 24 files instead of 1).
-for junk in mcps .dual-agent __pycache__ .claude/last_session.md; do
+for junk in mcps .dual-agent .claude/last_session.md; do
   rm -rf "$wtpath/$junk" 2>/dev/null || true
 done
+# __pycache__/.pyc are NESTED (src/__pycache__, tests/__pycache__) -> recursive
+# strip (Linux live-smoke finding: top-level-only left .pyc in the review diff).
+find "$wtpath" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+find "$wtpath" -name '*.pyc' -delete 2>/dev/null || true
 git -C "$wtpath" add -A 2>/dev/null || true
 if [[ -n "$(git -C "$wtpath" status --porcelain)" ]]; then
   git -C "$wtpath" commit -q -m "poc: grok build $stamp" >/dev/null 2>&1 || true
@@ -138,5 +142,14 @@ log "  2. test-guard:   ./lib/test-guard.sh --poc $BRANCH --base $INTO"
 log "  3. cross-review: ./dual-review.sh --poc $BRANCH --base $INTO"
 log "  4. merge:        ./dual-merge.sh --from $BRANCH --into $INTO --verify \"<test>\" --eval-k 5"
 
-[[ "$grok_exit" != 0 ]] && warn "grok exit != 0 (refusal/tool error?) — read the log."
+if [[ "$grok_exit" != 0 ]]; then
+  # Distinguish the benign turn-cap case (work often complete, grok still exits 1)
+  # from real refusals/tool errors (Linux live-smoke finding).
+  lasterr="$(ls -t "$logdir"/grok-*.err.log 2>/dev/null | head -1)"
+  if [[ -n "$lasterr" ]] && grep -qi 'max turns reached' "$lasterr" 2>/dev/null; then
+    warn "grok exit != 0: MAX TURNS REACHED — the POC may still be complete (check the diff above); raise --max-turns if it is not."
+  else
+    warn "grok exit != 0 (refusal/tool error?) — read the log: $lasterr"
+  fi
+fi
 exit 0

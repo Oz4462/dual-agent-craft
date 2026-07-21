@@ -70,17 +70,20 @@ if [[ "$DRYRUN" == true ]]; then warn "DryRun — no CLI calls."; exit 0; fi
 # --- Phase 2: ASSESS (Claude headless) -------------------------------------
 info "\n[A] Claude reviews (untrusted) ..."
 ar="$("$_HERE/lib/claude-call.sh" --prompt-file "$assessfile" --tag review-assess)"
-ar_exit="$(printf '%s' "$ar" | json_field /dev/stdin exit_code)"
+ar_exit="$(printf '%s' "$ar" | json_field_stdin exit_code)"
 [[ "$ar_exit" == 0 ]] || fail "claude-call (Assess) failed."
 assess_text="$(printf '%s' "$ar" | python3 -c 'import sys,json;print(json.load(sys.stdin)["text"])')"
 
 # Extract the issues JSON out of the (possibly fenced) reply.
-issues_json="$(printf '%s' "$assess_text" | python3 - <<'PY'
-import sys, json, re
-s = sys.stdin.read()
+# NOTE: data via env var — `printf | python3 - <<HEREDOC` silently loses the
+# pipe (the heredoc owns stdin); same class of bug as json_field /dev/stdin.
+issues_json="$(REPLY_TEXT="$assess_text" python3 - <<'PY'
+import os, json, re
+s = os.environ.get("REPLY_TEXT", "")
 s = re.sub(r'```json|```', '', s)
 i, j = s.find('{'), s.rfind('}')
-if i < 0 or j <= i: print('{"issues":[]}'); sys.exit(0)
+if i < 0 or j <= i:
+    print('{"issues":[]}'); raise SystemExit
 try:
     obj = json.loads(s[i:j+1]); print(json.dumps({"issues": obj.get("issues", [])}))
 except Exception:
@@ -129,12 +132,12 @@ EOF
 
 info "[R] Grok answers (1 round, no loop) ..."
 rr="$("$_HERE/lib/grok-call.sh" --prompt-file "$rebfile" --cwd "$(pwd)" --max-turns 6 --always-approve ${MODEL:+--model "$MODEL"} --tag review-rebuttal)"
-rr_exit="$(printf '%s' "$rr" | json_field /dev/stdin exit_code)"
+rr_exit="$(printf '%s' "$rr" | json_field_stdin exit_code)"
 [[ "$rr_exit" == 0 ]] || fail "grok-call (Rebuttal) failed."
 reb_text="$(printf '%s' "$rr" | python3 -c 'import sys,json;print(json.load(sys.stdin)["text"])')"
-rebuttals_json="$(printf '%s' "$reb_text" | python3 - <<'PY'
-import sys, json, re
-s = re.sub(r'```json|```', '', sys.stdin.read())
+rebuttals_json="$(REPLY_TEXT="$reb_text" python3 - <<'PY'
+import os, json, re
+s = re.sub(r'```json|```', '', os.environ.get("REPLY_TEXT", ""))
 i, j = s.find('{'), s.rfind('}')
 try: print(json.dumps({"rebuttals": json.loads(s[i:j+1]).get("rebuttals", [])}))
 except Exception: print('{"rebuttals":[]}')
