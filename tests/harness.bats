@@ -191,3 +191,28 @@ PY
   guard '{"tool_name":"Bash","tool_input":{"command":"echo warm"}}'
   [ "$status" -eq 0 ]
 }
+
+# --- self-improvement tooling (reflex-drill + self-check) --------------------
+
+@test "reflex-drill: all reflexes strong against the shipped guard" {
+  run "$HARNESS_ROOT/harness/bin/reflex-drill.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ALL REFLEXES STRONG"* ]]
+  [[ "$output" == *"weak=0"* ]]
+}
+
+@test "self-check: composes all five stages (syntax/configs/suite/reflexes/mutation)" {
+  # NOT executed here — self-check.sh runs tests/run.sh, so calling it from
+  # inside the suite would recurse infinitely (found live). Assert wiring only.
+  for stage in "1/5 syntax" "2/5 configs" "3/5 suite" "4/5 reflexes" "5/5 mutation"; do
+    grep -qF "$stage" "$HARNESS_ROOT/harness/bin/self-check.sh"
+  done
+}
+
+@test "self-check: flags a dirty tree honestly (mutation needs clean tree)" {
+  grep -q "working tree dirty" "$HARNESS_ROOT/harness/bin/self-check.sh"
+}
+
+@test "self-check: --quick skips the mutation stage" {
+  grep -q 'skipped: --quick' "$HARNESS_ROOT/harness/bin/self-check.sh"
+}
