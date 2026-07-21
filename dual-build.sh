@@ -75,14 +75,21 @@ if [[ "$DRYRUN" == true ]]; then warn "DryRun — no call."; exit 0; fi
 # $INTO stays clean.
 if [[ -n "$(git status --porcelain)" ]]; then
   cur="$(git rev-parse --abbrev-ref HEAD)"
-  if [[ "$cur" == "$INTO" ]]; then
+  # Detached HEAD (mid-rebase/bisect/manual checkout) returns literal "HEAD" —
+  # committing there would strand WIP on an unnamed commit (audit finding):
+  # park it on a wip branch exactly like the $INTO case.
+  if [[ "$cur" == "$INTO" || "$cur" == "HEAD" ]]; then
     wip="feat/wip-$stamp"
     git switch -c "$wip" >/dev/null 2>&1 || fail "could not create WIP branch $wip."
     log "${C_DIM}WIP -> new branch $wip ($INTO stays clean, no push).${C_RESET}"
   fi
   git add -A
-  git commit -q -m "wip: dual-agent base $stamp [no-push]" >/dev/null 2>&1 || true
-  log "${C_DIM}WIP committed -> Grok sees the current basis.${C_RESET}"
+  # Honest reporting (audit finding): only claim "WIP committed" if it WAS.
+  if git commit -q -m "wip: dual-agent base $stamp [no-push]" >/dev/null 2>&1; then
+    log "${C_DIM}WIP committed -> Grok sees the current basis.${C_RESET}"
+  else
+    fail "WIP commit failed (hook rejection / disk?) — Grok would build from a STALE base. Fix and re-run."
+  fi
 fi
 
 # fresh worktree from HEAD; clean any same-named leftover.
@@ -131,25 +138,34 @@ find "$wtpath" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 find "$wtpath" -name '*.pyc' -delete 2>/dev/null || true
 git -C "$wtpath" add -A 2>/dev/null || true
 if [[ -n "$(git -C "$wtpath" status --porcelain)" ]]; then
-  git -C "$wtpath" commit -q -m "poc: grok build $stamp" >/dev/null 2>&1 || true
+  # Commit even on a failed render (forensics), but LABEL it honestly (audit
+  # finding: a partial crash-state must not look identical to a clean build).
+  pocmsg="poc: grok build $stamp"
+  [[ "$grok_exit" != 0 ]] && pocmsg="poc(INCOMPLETE, grok exit=$grok_exit): grok build $stamp"
+  git -C "$wtpath" commit -q -m "$pocmsg" >/dev/null 2>&1 || warn "POC commit on $BRANCH failed — worktree left dirty for inspection."
   log "Uncommitted POC changes committed on $BRANCH."
 fi
 log "\nDiff-Stat (POC vs $INTO):"
 git -C "$wtpath" diff --stat "$INTO" 2>/dev/null || true
-ok "\nNEXT for Claude (CRAFT A+F):"
-log "  1. import-scan:  ./lib/import-scan.sh --poc $BRANCH --base $INTO"
-log "  2. test-guard:   ./lib/test-guard.sh --poc $BRANCH --base $INTO"
-log "  3. cross-review: ./dual-review.sh --poc $BRANCH --base $INTO"
-log "  4. merge:        ./dual-merge.sh --from $BRANCH --into $INTO --verify \"<test>\" --eval-k 5"
 
-if [[ "$grok_exit" != 0 ]]; then
-  # Distinguish the benign turn-cap case (work often complete, grok still exits 1)
-  # from real refusals/tool errors (Linux live-smoke finding).
-  lasterr="$(ls -t "$logdir"/grok-*.err.log 2>/dev/null | head -1)"
-  if [[ -n "$lasterr" ]] && grep -qi 'max turns reached' "$lasterr" 2>/dev/null; then
-    warn "grok exit != 0: MAX TURNS REACHED — the POC may still be complete (check the diff above); raise --max-turns if it is not."
-  else
-    warn "grok exit != 0 (refusal/tool error?) — read the log: $lasterr"
-  fi
+# NEXT steps only on success (audit finding: a failed render used to print the
+# full go-ahead banner first and the warning after) — and the script's own exit
+# code now propagates the render result so `dual-build.sh && ...` chains work.
+if [[ "$grok_exit" == 0 ]]; then
+  ok "\nNEXT for Claude (CRAFT A+F):"
+  log "  1. import-scan:  ./lib/import-scan.sh --poc $BRANCH --base $INTO --allow \"<PLAN 'Erlaubte Dependencies'>\""
+  log "  2. test-guard:   ./lib/test-guard.sh --poc $BRANCH --base $INTO"
+  log "  3. cross-review: ./dual-review.sh --poc $BRANCH --base $INTO"
+  log "  4. merge:        ./dual-merge.sh --from $BRANCH --into $INTO --verify \"<test>\" --eval-k 5 --test-guard"
+  exit 0
 fi
-exit 0
+
+# Failure path: distinguish the benign turn-cap case (work often complete, grok
+# still exits 1) from real refusals/tool errors (Linux live-smoke finding).
+lasterr="$(ls -t "$logdir"/grok-*.err.log 2>/dev/null | head -1)"
+if [[ -n "$lasterr" ]] && grep -qi 'max turns reached' "$lasterr" 2>/dev/null; then
+  warn "grok exit != 0: MAX TURNS REACHED — the POC may still be complete (check the diff above); raise --max-turns if it is not, then re-run the guards/review manually."
+else
+  warn "grok exit != 0 (refusal/tool error?) — read the log: $lasterr"
+fi
+exit "$grok_exit"

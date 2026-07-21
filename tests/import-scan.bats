@@ -74,3 +74,22 @@ scan() { run "$HARNESS_ROOT/lib/import-scan.sh" --out "$SCRATCH/scan.json" "$@";
   [ "$status" -eq 0 ]
   [ "$(jfield "$SCRATCH/scan.json" scanned)" = "1" ]
 }
+
+@test "AUDIT-FIX: dotted 'from pkg.sub import x' is scanned (invented -> BLOCK)" {
+  scan --diff-text $'+from totallyinventedpkg.sub import evil' --ecosystem python
+  [ "$status" -eq 2 ]
+  [ "$(jfield "$SCRATCH/scan.json" invented.0.pkg)" = "totallyinventedpkg" ]
+}
+
+@test "AUDIT-FIX: dotted stdlib 'from concurrent.futures import x' passes" {
+  scan --diff-text $'+from collections.abc import Mapping' --ecosystem python
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "PASS" ]
+}
+
+@test "AUDIT-FIX: missing --allow prints a loud off-contract-disabled warning" {
+  echo 200 > "$REGISTRY/requests.status"
+  scan --diff-text $'+import requests' --ecosystem python
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"off-contract check DISABLED"* ]]
+}

@@ -50,23 +50,42 @@ print(json.dumps(body))
 PY
 )"
 
-resp="$(curl -s --max-time "$TIMEOUT" -H 'Content-Type: application/json' -d "$body" "$ENDPOINT" 2>/dev/null)" || resp=""
-if [[ -z "$resp" ]]; then
+# Capture body AND http status (audit finding: `curl -s` without -f treats an
+# HTTP error body — e.g. {"error":"model not found"} — as a successful reply).
+http_out="$(curl -s --max-time "$TIMEOUT" -w $'\n%{http_code}' \
+             -H 'Content-Type: application/json' -d "$body" "$ENDPOINT" 2>/dev/null)" || http_out=""
+status="${http_out##*$'\n'}"
+resp="${http_out%$'\n'*}"
+if [[ -z "$http_out" || -z "$resp" ]]; then
   warn "BLOCKED: Ollama unreachable/failed at $ENDPOINT. Run 'ollama serve' + pull model '$MODEL'."
   emit_result 1 /dev/null /dev/null "$outfile"; exit 1
 fi
 printf '%s' "$resp" >"$outfile"
+if [[ "$status" != 2* ]]; then
+  warn "BLOCKED: Ollama returned HTTP $status: $(head -c 200 "$outfile")"
+  emit_result 1 /dev/null "$outfile" "$outfile"; exit 1
+fi
 
-# Ollama /api/chat shape: {message:{content:...}}. Extract the content.
+# Ollama /api/chat shape: {message:{content:...}}. A response that parses but
+# lacks message.content is a FAILURE (fail-closed), not an empty success.
 textfile="$(mktemp)"
-RESP="$resp" python3 - >"$textfile" <<'PY'
-import os, json
+if ! RESP="$resp" python3 - >"$textfile" <<'PY'
+import os, json, sys
 try:
     j = json.loads(os.environ["RESP"])
-    print(j.get("message", {}).get("content", ""), end="")
+    c = j.get("message", {}).get("content")
+    if not isinstance(c, str):
+        sys.exit(1)
+    print(c, end="")
+except SystemExit:
+    raise
 except Exception:
-    pass
+    sys.exit(1)
 PY
+then
+  warn "BLOCKED: Ollama reply had no message.content (malformed/unexpected shape) — see $outfile"
+  emit_result 1 /dev/null "$outfile" "$outfile"; rm -f "$textfile"; exit 1
+fi
 emit_result 0 "$textfile" "$outfile" "$outfile"
 rm -f "$textfile"
 exit 0

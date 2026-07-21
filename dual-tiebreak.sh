@@ -56,13 +56,20 @@ log "B        : $B_DESC"
 [[ "$DRYRUN" == true ]] && { warn "DryRun — no calls."; exit 0; }
 
 # Build one candidate: fresh worktree from BASE, Grok renders it, then eval it.
-# Prints "<pass_pow_k> <passes> <seconds>" for the winner comparison.
+# Prints "<status> <pass_pow_k> <passes> <seconds>". status is HONEST (audit
+# finding: failures must never masquerade as a measured 0-score):
+#   measured      — build ran AND eval-harness produced a real EVAL json
+#   build-failed  — worktree or grok render failed; nothing was measured
+#   eval-failed   — eval-harness itself failed to score (not a red test run)
 build_and_eval() {
-  local tag="$1" desc="$2" branch="tie-$ISSUE_ID-$tag-$stamp"
+  # Separate statements: in `local a="$1" b="...$a..."` bash expands ALL words
+  # BEFORE any assignment happens -> $a would be unbound (set -u error).
+  local tag="$1" desc="$2"
+  local branch="tie-$ISSUE_ID-$tag-$stamp"
   local wt; wt="$(dirname "$(pwd)")/wt-$branch"
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
   git branch -D "$branch" >/dev/null 2>&1 || true
-  git worktree add -b "$branch" "$wt" "$BASE" >/dev/null 2>&1 || { echo "0 0 999999"; return; }
+  git worktree add -b "$branch" "$wt" "$BASE" >/dev/null 2>&1 || { echo "build-failed 0 0 0"; return; }
   local pf="$tmpdir/tiebreak-$tag-$stamp.txt"
   cat > "$pf" <<EOF
 You are the BUILDER. Implement the contract below using SPECIFICALLY this approach:
@@ -72,51 +79,66 @@ Smallest correct implementation. Implementation files only (no test/verify edits
 === CONTRACT (PLAN.md) ===
 $plan_text
 EOF
+  local build_rc=0
   "$_HERE/lib/grok-call.sh" --prompt-file "$pf" --cwd "$wt" --max-turns "$MAX_TURNS" \
-     --always-approve ${MODEL:+--model "$MODEL"} --tag "tiebreak-$tag" >/dev/null 2>&1 || true
-  # measure: pass^k + wall-clock of the verify
+     --always-approve ${MODEL:+--model "$MODEL"} --tag "tiebreak-$tag" >/dev/null 2>&1 || build_rc=$?
+  if [[ $build_rc -ne 0 ]]; then
+    git worktree remove --force "$wt" >/dev/null 2>&1 || true
+    echo "build-failed 0 0 0"; return
+  fi
+  # measure: pass^k + wall-clock of the verify. eval-harness exits 1 on a RED
+  # candidate too, so "did it score?" is judged by the EVAL json, not exit code.
+  local evalfile="$ledger/EVAL-tie-$tag.json"
+  rm -f "$evalfile"
   local t0 t1 secs
   t0=$(date +%s)
   "$_HERE/lib/eval-harness.sh" --verify "$VERIFY" --k "$EVAL_K" --cwd "$wt" \
-     --out "$ledger/EVAL-tie-$tag.json" >/dev/null 2>&1 || true
+     --out "$evalfile" >/dev/null 2>&1 || true
   t1=$(date +%s); secs=$((t1 - t0))
-  local ppk passes
-  ppk="$(json_field "$ledger/EVAL-tie-$tag.json" pass_pow_k)"; ppk="${ppk:-0}"
-  passes="$(json_field "$ledger/EVAL-tie-$tag.json" passes)"; passes="${passes:-0}"
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
-  echo "$ppk $passes $secs"
+  if [[ ! -s "$evalfile" ]]; then echo "eval-failed 0 0 0"; return; fi
+  local ppk passes
+  ppk="$(json_field "$evalfile" pass_pow_k)"
+  passes="$(json_field "$evalfile" passes)"
+  [[ -z "$ppk" || -z "$passes" ]] && { echo "eval-failed 0 0 0"; return; }
+  echo "measured $ppk $passes $secs"
 }
 
 log "\n[A] building + measuring approach A ..."
-read -r a_ppk a_passes a_secs <<<"$(build_and_eval a "$A_DESC")"
+read -r a_st a_ppk a_passes a_secs <<<"$(build_and_eval a "$A_DESC")"
 log "[B] building + measuring approach B ..."
-read -r b_ppk b_passes b_secs <<<"$(build_and_eval b "$B_DESC")"
+read -r b_st b_ppk b_passes b_secs <<<"$(build_and_eval b "$B_DESC")"
 
-# Winner: higher pass^k, then more passes, then faster. Pure measurement.
-winner="$(python3 - "$a_ppk" "$a_passes" "$a_secs" "$b_ppk" "$b_passes" "$b_secs" <<'PY'
+# Winner: only MEASURED candidates compete (higher pass^k, then passes, then
+# faster). A non-measured candidate loses to a measured one by definition;
+# if NEITHER was measured there is no verdict — that is a hard failure.
+winner="$(python3 - "$a_st" "$a_ppk" "$a_passes" "$a_secs" "$b_st" "$b_ppk" "$b_passes" "$b_secs" <<'PY'
 import sys
-ap,aps,asec,bp,bps,bsec = map(int, sys.argv[1:7])
-a = (ap, aps, -asec); b = (bp, bps, -bsec)
+ast, ap, aps, asec, bst, bp, bps, bsec = sys.argv[1:9]
+am, bm = ast == "measured", bst == "measured"
+if not am and not bm: print("none"); raise SystemExit
+if am != bm: print("A" if am else "B"); raise SystemExit
+a = (int(ap), int(aps), -int(asec)); b = (int(bp), int(bps), -int(bsec))
 print("A" if a > b else "B" if b > a else "tie")
 PY
 )"
 
 python3 - "$ledger/TIEBREAK.json" "$stamp" "$ISSUE_ID" "$winner" \
-  "$a_ppk" "$a_passes" "$a_secs" "$b_ppk" "$b_passes" "$b_secs" "$A_DESC" "$B_DESC" <<'PY'
+  "$a_st" "$a_ppk" "$a_passes" "$a_secs" "$b_st" "$b_ppk" "$b_passes" "$b_secs" "$A_DESC" "$B_DESC" <<'PY'
 import sys, json
-(out, stamp, iid, winner, app, aps, asec, bpp, bps, bsec, adesc, bdesc) = sys.argv[1:13]
+(out, stamp, iid, winner, ast, app, aps, asec, bst, bpp, bps, bsec, adesc, bdesc) = sys.argv[1:15]
 open(out,"w").write(json.dumps({
   "stamp":stamp,"issue_id":iid,"winner":winner,
-  "A":{"desc":adesc,"pass_pow_k":int(app),"passes":int(aps),"seconds":int(asec)},
-  "B":{"desc":bdesc,"pass_pow_k":int(bpp),"passes":int(bps),"seconds":int(bsec)},
+  "A":{"desc":adesc,"status":ast,"pass_pow_k":int(app),"passes":int(aps),"seconds":int(asec)},
+  "B":{"desc":bdesc,"status":bst,"pass_pow_k":int(bpp),"passes":int(bps),"seconds":int(bsec)},
 }, indent=2))
 PY
 
 info "\n=== Tie-Break done ==="
-log "  A: pass^k=$a_ppk passes=$a_passes ${a_secs}s   |   B: pass^k=$b_ppk passes=$b_passes ${b_secs}s"
-if [[ "$winner" == tie ]]; then
-  warn "  WINNER: tie (both measured equal) — architect picks on other grounds; recorded."
-else
-  ok "  WINNER: approach $winner (measured, not argued). ledger/TIEBREAK.json"
-fi
+log "  A[$a_st]: pass^k=$a_ppk passes=$a_passes ${a_secs}s   |   B[$b_st]: pass^k=$b_ppk passes=$b_passes ${b_secs}s"
+case "$winner" in
+  none) fail "NEITHER candidate could be built+measured (A: $a_st, B: $b_st) — no verdict fabricated. Fix the build/eval setup and re-run." ;;
+  tie)  warn "  WINNER: tie (both measured equal) — architect picks on other grounds; recorded." ;;
+  *)    ok "  WINNER: approach $winner (measured, not argued). ledger/TIEBREAK.json" ;;
+esac
 exit 0

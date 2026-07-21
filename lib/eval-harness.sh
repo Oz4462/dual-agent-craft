@@ -29,6 +29,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$VERIFY" ]] || fail "eval-harness: --verify is required."
+# Setup errors must surface distinctly, not masquerade as K red test runs
+# (audit finding: bad --cwd looked identical to a genuinely failing candidate).
+[[ -d "$CWD" ]] || fail "eval-harness: --cwd does not exist: $CWD (setup error, NOT a red run)."
 [[ "$K" -ge 1 ]] 2>/dev/null || K=1
 
 passes=0

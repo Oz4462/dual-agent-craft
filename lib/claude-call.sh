@@ -24,14 +24,15 @@ _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$_HERE/common.sh"
 
-PROMPT_FILE=""; MODEL=""; SYSTEM_PROMPT=""; MAX_BUDGET="0"; TAG="claude"
+PROMPT_FILE=""; MODEL=""; SYSTEM_PROMPT=""; MAX_BUDGET="0"; TAG="claude"; DISALLOWED_TOOLS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prompt-file)    PROMPT_FILE="$2"; shift 2;;
-    --model)          MODEL="$2"; shift 2;;
-    --system-prompt)  SYSTEM_PROMPT="$2"; shift 2;;
-    --max-budget-usd) MAX_BUDGET="$2"; shift 2;;
-    --tag)            TAG="$2"; shift 2;;
+    --prompt-file)      PROMPT_FILE="$2"; shift 2;;
+    --model)            MODEL="$2"; shift 2;;
+    --system-prompt)    SYSTEM_PROMPT="$2"; shift 2;;
+    --max-budget-usd)   MAX_BUDGET="$2"; shift 2;;
+    --disallowed-tools) DISALLOWED_TOOLS="$2"; shift 2;;  # least-privilege for tool-free roles (ASSESS)
+    --tag)              TAG="$2"; shift 2;;
     *) fail "claude-call: unknown arg '$1'";;
   esac
 done
@@ -46,6 +47,7 @@ errfile="$logdir/$TAG-$stamp.err.log"
 args=(-p --output-format json --exclude-dynamic-system-prompt-sections)
 [[ -n "$MODEL" ]] && args+=(--model "$MODEL")
 [[ -n "$SYSTEM_PROMPT" ]] && args+=(--append-system-prompt "$SYSTEM_PROMPT")
+[[ -n "$DISALLOWED_TOOLS" ]] && args+=(--disallowed-tools "$DISALLOWED_TOOLS")
 awk -v b="$MAX_BUDGET" 'BEGIN{exit !(b>0)}' && args+=(--max-budget-usd "$MAX_BUDGET")
 
 # Prompt on stdin; stdout -> result file, stderr -> err log.
@@ -55,6 +57,10 @@ exit_code=$?
 textfile="$(mktemp)"; json_extract_text "$outfile" >"$textfile"
 is_error="$(json_field "$outfile" is_error)"
 cost="$(json_field "$outfile" total_cost_usd)"
+# FAIL-CLOSED (audit finding): an in-band application error (is_error:true with
+# process exit 0 — budget cutoff, refusal) must surface in the EMITTED exit_code,
+# because callers read the contract JSON, not this wrapper's own $?.
+[[ "$is_error" == "true" && "$exit_code" == 0 ]] && exit_code=1
 
 # Cost telemetry -> SPEND.jsonl (feeds budget-guard).
 if [[ -n "$cost" ]]; then

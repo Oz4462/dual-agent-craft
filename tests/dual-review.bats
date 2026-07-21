@@ -108,3 +108,29 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *BLOCKED* ]]
 }
+
+@test "AUDIT-FIX: garbage/prose assess reply -> BLOCK, never 'clean'" {
+  cat > "$FAKEBIN/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo '{"result":"I am sorry, I cannot review this right now.","is_error":false}'
+STUB
+  chmod +x "$FAKEBIN/claude"
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-review.sh" --plan PLAN.md --poc feat/poc --base main
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"fail-closed"* ]]
+}
+
+@test "AUDIT-FIX: is_error:true with process exit 0 -> assess BLOCKED" {
+  cat > "$FAKEBIN/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo '{"result":"budget exceeded","is_error":true}'
+STUB
+  chmod +x "$FAKEBIN/claude"
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-review.sh" --plan PLAN.md --poc feat/poc --base main
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Assess"*"failed"* ]]
+}

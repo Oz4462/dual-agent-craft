@@ -68,13 +68,19 @@ log "Mechanik : 1 Assess (Claude) + 1 Rebuttal (Grok), then the eval decides. No
 if [[ "$DRYRUN" == true ]]; then warn "DryRun — no CLI calls."; exit 0; fi
 
 # --- Phase 2: ASSESS (Claude headless) -------------------------------------
+# Least-privilege: ASSESS only emits a JSON verdict — it never needs tools
+# (audit finding: untrusted diff in-prompt + tool access = injection surface).
 info "\n[A] Claude reviews (untrusted) ..."
-ar="$("$_HERE/lib/claude-call.sh" --prompt-file "$assessfile" --tag review-assess)"
+ar="$("$_HERE/lib/claude-call.sh" --prompt-file "$assessfile" \
+        --disallowed-tools "Bash,Write,Edit,WebFetch,WebSearch" --tag review-assess)"
 ar_exit="$(printf '%s' "$ar" | json_field_stdin exit_code)"
 [[ "$ar_exit" == 0 ]] || fail "claude-call (Assess) failed."
 assess_text="$(printf '%s' "$ar" | python3 -c 'import sys,json;print(json.load(sys.stdin)["text"])')"
 
 # Extract the issues JSON out of the (possibly fenced) reply.
+# FAIL-CLOSED (audit finding): an unparseable/garbage reply must BLOCK — it
+# must never be laundered into the same '{"issues":[]}' as a genuinely clean
+# review. Only an explicit, parseable "issues" array counts as a verdict.
 # NOTE: data via env var — `printf | python3 - <<HEREDOC` silently loses the
 # pipe (the heredoc owns stdin); same class of bug as json_field /dev/stdin.
 issues_json="$(REPLY_TEXT="$assess_text" python3 - <<'PY'
@@ -83,13 +89,21 @@ s = os.environ.get("REPLY_TEXT", "")
 s = re.sub(r'```json|```', '', s)
 i, j = s.find('{'), s.rfind('}')
 if i < 0 or j <= i:
-    print('{"issues":[]}'); raise SystemExit
+    print('PARSE_FAIL'); raise SystemExit
 try:
-    obj = json.loads(s[i:j+1]); print(json.dumps({"issues": obj.get("issues", [])}))
+    obj = json.loads(s[i:j+1])
+    if not isinstance(obj, dict) or "issues" not in obj or not isinstance(obj["issues"], list):
+        print('PARSE_FAIL'); raise SystemExit
+    print(json.dumps({"issues": obj["issues"]}))
+except SystemExit:
+    raise
 except Exception:
-    print('{"issues":[]}')
+    print('PARSE_FAIL')
 PY
 )"
+if [[ "$issues_json" == "PARSE_FAIL" ]]; then
+  fail "Claude's ASSESS reply contained no parseable issues-JSON — model failure is NOT a clean review (fail-closed). Raw reply logged under .dual-agent/logs (tag review-assess)."
+fi
 issue_count="$(printf '%s' "$issues_json" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["issues"]))')"
 log "    $issue_count issue(s) reported."
 
@@ -104,7 +118,15 @@ fi
 
 # --- Phase 3: REBUTTAL (Grok headless, exactly ONE round) ------------------
 # Token-saving: rebuttal only needs the flagged files, not the whole diff.
-mapfile -t issue_files < <(printf '%s' "$issues_json" | python3 -c 'import sys,json;[print(x["file"]) for x in json.load(sys.stdin)["issues"] if x.get("file")]' | sort -u)
+# NUL-terminated (audit finding): a hallucinated "file" value containing \n
+# must not split into two array entries.
+mapfile -d '' -t issue_files < <(printf '%s' "$issues_json" | python3 -c '
+import sys, json
+seen = set()
+for x in json.load(sys.stdin)["issues"]:
+    f = x.get("file")
+    if f and "\n" not in f and f not in seen:
+        seen.add(f); sys.stdout.write(f + "\0")')
 if [[ ${#issue_files[@]} -gt 0 ]]; then
   reb_diff="$(git diff "$BASE...$POC" -- "${issue_files[@]}")"
 else reb_diff="$diff"; fi
@@ -131,8 +153,18 @@ $issues_json
 EOF
 
 info "[R] Grok answers (1 round, no loop) ..."
-rr="$("$_HERE/lib/grok-call.sh" --prompt-file "$rebfile" --cwd "$(pwd)" --max-turns 6 --always-approve ${MODEL:+--model "$MODEL"} --tag review-rebuttal)"
+# SECURITY (audit finding): the rebuttal prompt embeds the builder's untrusted
+# diff — never run this --always-approve turn in the real repo. Same isolation
+# as the build phase: disposable detached worktree of $POC + the deny rules
+# (deny overrides approve; blocks rm -rf / git push / curl / wget).
+reb_wt="$(mktemp -d)/reb"
+git worktree add --detach "$reb_wt" "$POC" >/dev/null 2>&1 || fail "could not create rebuttal worktree from $POC."
+deny=('Bash(rm -rf *)' 'Bash(git push *)' 'Bash(curl *)' 'Bash(wget *)')
+deny_args=(); for d in "${deny[@]}"; do deny_args+=(--deny "$d"); done
+rr="$("$_HERE/lib/grok-call.sh" --prompt-file "$rebfile" --cwd "$reb_wt" --max-turns 6 \
+        --always-approve "${deny_args[@]}" ${MODEL:+--model "$MODEL"} --tag review-rebuttal)"
 rr_exit="$(printf '%s' "$rr" | json_field_stdin exit_code)"
+git worktree remove --force "$reb_wt" >/dev/null 2>&1 || true
 [[ "$rr_exit" == 0 ]] || fail "grok-call (Rebuttal) failed."
 reb_text="$(printf '%s' "$rr" | python3 -c 'import sys,json;print(json.load(sys.stdin)["text"])')"
 rebuttals_json="$(REPLY_TEXT="$reb_text" python3 - <<'PY'

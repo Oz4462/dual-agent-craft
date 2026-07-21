@@ -53,3 +53,11 @@ mk_spend() { # args: lines...
   run "$HARNESS_ROOT/lib/budget-guard.sh" --cap 100 --spend-file "$SPEND"
   [ "$status" -eq 2 ]
 }
+
+@test "AUDIT-FIX: malformed cost_usd is skipped; valid entries still summed" {
+  mk_spend "{\"stamp\":\"${MONTH}01-000000\",\"cost_usd\":\"oops\"}" \
+           "{\"stamp\":\"${MONTH}02-000000\",\"cost_usd\":2.00}"
+  run "$HARNESS_ROOT/lib/budget-guard.sh" --cap 100 --spend-file "$SPEND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spent=2.00"* ]]
+}

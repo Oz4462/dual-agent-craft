@@ -82,9 +82,11 @@ for raw in diff.splitlines():
     if eco in ('auto', 'python'):
         m = re.match(r'\s*import\s+([A-Za-z_][A-Za-z0-9_]*)', line)
         if m: pkgs.setdefault(m.group(1), 'python')
-        # `from X import ...` but NOT relative `from . / from .mod import`
-        m = re.match(r'\s*from\s+([A-Za-z_][A-Za-z0-9_]*)\s+import', line)
-        if m: pkgs.setdefault(m.group(1), 'python')
+        # `from X[.sub] import ...` -> top-level package; NOT relative `from .`.
+        # Dotted form MUST be captured (audit finding: `from fakepkg.sub import x`
+        # previously bypassed the scan entirely because '.' broke the match).
+        m = re.match(r'\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import', line)
+        if m: pkgs.setdefault(m.group(1).split('.')[0], 'python')
     if eco in ('auto', 'npm'):
         m = re.search(r'''(?:import\s.*\sfrom|require\()\s*['"]([^'"]+)['"]''', line)
         if m:
@@ -98,13 +100,20 @@ for name, kind in pkgs.items():
 PY
 )
 
+# Loud, once: with no allow-list the off-contract half of the gate cannot fire
+# (registry-404 check still runs). Silent-disable was an audit finding.
+[[ -z "$ALLOW" ]] && warn "import-scan: no --allow list given -> off-contract check DISABLED (registry-only mode). Pass --allow from PLAN 'Erlaubte Dependencies' for the full gate."
+
 # --- Registry check (real or stubbed for tests) ----------------------------
 # Prints the HTTP status for a package, honouring IMPORT_SCAN_REGISTRY_BASE.
 registry_status() {
   local pkg="$1" kind="$2"
   if [[ -n "${IMPORT_SCAN_REGISTRY_BASE:-}" ]]; then
     local base="${IMPORT_SCAN_REGISTRY_BASE#file://}"
-    if [[ -f "$base/$pkg.status" ]]; then cat "$base/$pkg.status"; else echo "404"; fi
+    # Defense in depth: constrain the name before it becomes a filesystem path
+    # (npm regex admits nearly any char; keep traversal chars out of the stub path).
+    local safe="${pkg//[^A-Za-z0-9._@-]/_}"; safe="${safe//../_}"
+    if [[ -f "$base/$safe.status" ]]; then cat "$base/$safe.status"; else echo "404"; fi
     return 0
   fi
   local url
@@ -118,7 +127,8 @@ package_age_days() {
   local pkg="$1" kind="$2"
   if [[ -n "${IMPORT_SCAN_REGISTRY_BASE:-}" ]]; then
     local base="${IMPORT_SCAN_REGISTRY_BASE#file://}"
-    [[ -f "$base/$pkg.age" ]] && cat "$base/$pkg.age"
+    local safe="${pkg//[^A-Za-z0-9._@-]/_}"; safe="${safe//../_}"
+    [[ -f "$base/$safe.age" ]] && cat "$base/$safe.age"
     return 0
   fi
   local url body

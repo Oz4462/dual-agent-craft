@@ -79,3 +79,15 @@ EOF
   [ "$status" -eq 0 ]
   [ ! -f "$FAKEBIN/grok.called" ]
 }
+
+@test "AUDIT-FIX: claude is_error:true surfaces in the EMITTED contract exit_code" {
+  cat > "$FAKEBIN/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo '{"result":"boom","is_error":true}'
+STUB
+  chmod +x "$FAKEBIN/claude"
+  run "$HARNESS_ROOT/lib/claude-call.sh" --prompt-file "$PROMPT" --tag t
+  [ "$status" -ne 0 ]
+  [ "$(printf '%s' "$output" | exit_of)" != "0" ]
+}

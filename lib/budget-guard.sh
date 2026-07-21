@@ -27,26 +27,37 @@ done
 [[ -z "$SPEND_FILE" ]] && SPEND_FILE="$(repo_root)/ledger/SPEND.jsonl"
 
 MONTH="$(date -u +%Y%m)"
-read -r spent limit would ok < <(python3 - "$SPEND_FILE" "$MONTH" "$CAP" "$SAFETY" "$ESTIMATE" <<'PY'
+# The whole computation is wrapped so ONE malformed ledger line can neither
+# crash the guard (empty vars -> misleading 0.00 output) nor wedge every future
+# invocation (audit finding). Bad entries are skipped with a stderr note.
+if ! read -r spent limit would ok < <(python3 - "$SPEND_FILE" "$MONTH" "$CAP" "$SAFETY" "$ESTIMATE" <<'PY'
 import sys, json, os
 path, month, cap, safety, est = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5])
 spent = 0.0
+bad = 0
 if os.path.exists(path):
     for line in open(path, encoding="utf-8"):
         line = line.strip()
         if not line: continue
-        try: e = json.loads(line)
-        except Exception: continue
-        stamp = str(e.get("stamp", ""))
-        # stamp is either 20260721-... (utc_stamp) or ISO 2026-07-21T...; normalise to YYYYMM
-        ym = stamp[:6] if stamp[:6].isdigit() else stamp[:7].replace("-", "")
-        if ym == month and e.get("cost_usd") is not None:
-            spent += float(e["cost_usd"])
+        try:
+            e = json.loads(line)
+            stamp = str(e.get("stamp", ""))
+            # stamp is either 20260721-... (utc_stamp) or ISO 2026-07-21T...; normalise to YYYYMM
+            ym = stamp[:6] if stamp[:6].isdigit() else stamp[:7].replace("-", "")
+            if ym == month and e.get("cost_usd") is not None:
+                spent += float(e["cost_usd"])   # ValueError on garbage -> caught below
+        except Exception:
+            bad += 1
+            continue
+if bad:
+    print(f"budget-guard: skipped {bad} malformed SPEND.jsonl line(s)", file=sys.stderr)
 limit = cap * safety
 would = spent + est
 print(round(spent,4), round(limit,4), round(would,4), int(would <= limit))
 PY
-)
+) || [[ -z "$ok" ]]; then
+  fail_code 2 "budget-guard: could not compute spend from $SPEND_FILE (parse error) — blocking (fail-closed)."
+fi
 
 if [[ "$ok" == 1 ]]; then col="$C_GREEN"; status="OK"; else col="$C_RED"; status="BLOCKED"; fi
 printf '%sbudget-guard [%s]: spent=%.2f + est=%.2f = %.2f USD  vs limit=%.2f (cap=%s x %s) -> %s%s\n' \

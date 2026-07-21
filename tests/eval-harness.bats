@@ -52,3 +52,10 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *BLOCKED* ]]
 }
+
+@test "AUDIT-FIX: nonexistent --cwd is a distinct setup BLOCK, not K red runs" {
+  run "$HARNESS_ROOT/lib/eval-harness.sh" --verify "true" --k 3 --cwd "$SCRATCH/does-not-exist" --out "$SCRATCH/e.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"setup error"* ]]
+  [ ! -f "$SCRATCH/e.json" ]
+}

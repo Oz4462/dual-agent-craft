@@ -66,3 +66,11 @@ guard() { run "$HARNESS_ROOT/lib/test-guard.sh" --out "$SCRATCH/tg.json" "$@"; }
   guard --poc feat/poc --base main
   [ "$status" -eq 2 ]
 }
+
+@test "AUDIT-FIX: nonexistent branches -> BLOCK (never a silent PASS)" {
+  make_repo "$SCRATCH/repo"
+  cd "$SCRATCH/repo"
+  guard --poc no-such-branch --base also-missing
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"git diff failed"* ]]
+}

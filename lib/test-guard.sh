@@ -37,7 +37,11 @@ PATTERN='(^|/)(tests?|__tests__|spec)/|(^|/)conftest\.py$|(^|/)verify/|_test\.(p
 [[ -n "$EXTRA" ]] && PATTERN="$PATTERN|$EXTRA"
 
 if [[ -z "$DIFF_FILES" ]]; then
-  DIFF_FILES="$(git diff --name-only "$BASE...$POC" 2>/dev/null || true)"
+  # FAIL-CLOSED: a failing git diff (bad/missing branch) must BLOCK, never
+  # silently produce an empty list that reads as "PASS" (audit finding).
+  if ! DIFF_FILES="$(git diff --name-only "$BASE...$POC" 2>&1)"; then
+    fail_code 2 "test-guard: git diff failed ($BASE...$POC) — cannot verify invariant 7: $DIFF_FILES"
+  fi
 fi
 
 violations=()
