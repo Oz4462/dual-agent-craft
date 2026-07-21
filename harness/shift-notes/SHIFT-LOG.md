@@ -23,3 +23,25 @@
   adversary reorders/renames flags; a fixed-string regex is a weak reflex.
 - **STATE**: branch feat/bash-port, 11 commits ahead of main, tree clean,
   suite 94/94. Unpushed (owner rule). Session spend high (~$52).
+
+## 2026-07-21 — Agent-orchestrated self-improvement (workflow craft-self-improve)
+- **DONE (verified)**: Ran a 44-agent workflow (6 analysis lenses × verified findings),
+  got 38 verified improvements (2 P0, 17 P1). Self-verified each before fixing, +tests.
+  - P0: test-guard non-ASCII bypass (git quotePath C-quoting defeated anchors — umlaut
+    test file turned BLOCK->PASS; reproduced live in this German env) → quotePath=false + -z.
+  - P0: dual-merge unguarded `git checkout $INTO` (fail-open at the most destructive step)
+    → `|| fail` + HEAD assertion.
+  - SELF-FOUND: self-check timeout SIGTERM left a MUTATED guard on disk (mutation-train
+    had no restore-on-interrupt) → EXIT/INT/TERM trap; SKIP now fails (was fail-open).
+  - P1: codex --full-auto silently voided its sandbox → upgrade read-only->workspace-write,
+    no bypass flag. eval-k numeric validation. guard: +command-substitution shell-exec +
+    extended secret readers (xxd/base64/cp…). Doc integrity: test-count 88->106, nightly
+    runs full battery, W4 agent refs fixed.
+- **Verify**: suite 106/106 · reflex-drill 44/44 strong · mutation-train 12/12 killed 0 stale
+  · self-check --quick FIT.
+- **LESSON (-> muscle #35)**: a mutation/fault-injection tool MUST restore on interrupt
+  (trap), or a killed run silently weakens a live guard. Found the hard way.
+- **OPEN**: 30 verified backlog items remain (mostly P2 + a few M-effort P1: Ollama-scout
+  wiring, Codex-reviewer role in dual-review, import-scan reading PLAN allowlist, dual-build
+  test coverage). Handed to owner to greenlight.
+- **STATE**: branch feat/bash-port, 17 commits ahead of main, tree clean, suite 106/106, unpushed.

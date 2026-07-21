@@ -1,4 +1,4 @@
-# Muscle Memory — 34 earned lessons
+# Muscle Memory — 35 earned lessons
 
 > Instant recall before touching code. Each entry is one burned lesson: many were
 > paid for in THIS repo (marked ⚡ = found live here), the rest in prior projects.
@@ -87,3 +87,7 @@
 34. ⚡ **Guard by capability, not by spelling.** An adversary reorders/renames
     flags (`rm -r -f` = `rm --recursive --force` = `rm -rf`); a fixed-string
     reflex is a weak reflex. Detect the capability, then scope the target.
+35. ⚡ **A fault-injection tool must restore on interrupt.** mutation-train left a
+    mutated guard on disk when a timeout killed it mid-run (no trap) — silently
+    weakening a live reflex. Any tool that temporarily breaks the tree needs an
+    EXIT/INT/TERM trap, and a no-op mutation (SKIP) must FAIL, not read as 'killed'.
