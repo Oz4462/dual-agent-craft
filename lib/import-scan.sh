@@ -248,6 +248,16 @@ for i in "${!ALLOW_ARR[@]}"; do
   ALLOW_ARR[$i]="${a%"${a##*[![:space:]]}"}"                # rtrim
 done
 
+# Repo root for first-party detection (local modules are never "off-contract").
+# Live finding: `from src.pkg00.multiply import …` flagged top-level `src` as OFF-CONTRACT.
+SCAN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+is_first_party() {
+  local pkg="$1"
+  # Safe name only — no path traversal
+  [[ "$pkg" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  [[ -d "$SCAN_ROOT/$pkg" || -f "$SCAN_ROOT/$pkg.py" || -f "$SCAN_ROOT/$pkg/__init__.py" ]]
+}
+
 invented=(); off_contract=(); okpkgs=(); unknown=(); suspect=()
 scanned=0
 for pl in "${PKG_LINES[@]}"; do
@@ -257,6 +267,10 @@ for pl in "${PKG_LINES[@]}"; do
   # stdlib?
   if { [[ "$kind" == python ]] && in_list "$pkg" $PY_STD; } || { [[ "$kind" == npm ]] && in_list "$pkg" $NODE_STD; }; then
     okpkgs+=("$pkg:$kind:stdlib"); continue
+  fi
+  # First-party / in-repo packages (src/, multiply.py, app/, …) — not a dependency.
+  if [[ "$kind" == python ]] && is_first_party "$pkg"; then
+    okpkgs+=("$pkg:$kind:first-party"); continue
   fi
   in_allow=false
   # armed (allow given or --plan): membership decides. unarmed (no list): allow all.

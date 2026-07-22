@@ -17,6 +17,22 @@ scan() { run "$HARNESS_ROOT/lib/import-scan.sh" --out "$SCRATCH/scan.json" "$@";
   [ "$(jfield "$SCRATCH/scan.json" scanned)" = "2" ]
 }
 
+@test "first-party in-repo package (src/) is not OFF-CONTRACT under stdlib-only PLAN" {
+  # Live finding: from src.pkg00.multiply import … flagged top-level "src".
+  make_repo "$SCRATCH/repo"
+  mkdir -p "$SCRATCH/repo/src/pkg00"
+  echo 'x=1' > "$SCRATCH/repo/src/pkg00/__init__.py"
+  cat >"$SCRATCH/repo/PLAN.md" <<'EOF'
+- Erlaubte Dependencies: stdlib only
+EOF
+  cd "$SCRATCH/repo"
+  scan --diff-text $'+from src.pkg00.multiply import multiply\n+import os' \
+    --ecosystem python --plan "$SCRATCH/repo/PLAN.md"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "PASS" ]
+  cd "$HARNESS_ROOT"
+}
+
 @test "importlib is stdlib — never OFF-CONTRACT under stdlib-only PLAN" {
   # Live finding: importlib missing from PY_STD + PLAN "stdlib only (…)" false off-contract.
   cat >"$SCRATCH/PLAN.md" <<'EOF'
