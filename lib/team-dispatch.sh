@@ -477,6 +477,12 @@ PY
     # Mark in progress
     _team_mark_package "$work" "$i" "in_progress" "worker=$assignee started"
 
+    # Snapshot porcelain BEFORE worker so pre-existing dirty files are not trespass.
+    local baseline_porc=""
+    if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      baseline_porc="$(git -C "$root" status --porcelain -uall 2>/dev/null || true)"
+    fi
+
     local pf tmpdir
     tmpdir="$root/.dual-agent/tmp"
     mkdir -p "$tmpdir"
@@ -547,10 +553,11 @@ EOF
     # - non-noise outside owned paths = trespass (fail-closed)
     local classify_json package_changes trespass_changes
     classify_json="$(
-      PATHS_JSON="$paths_json" ROOT="$root" python3 - <<'PY'
+      PATHS_JSON="$paths_json" ROOT="$root" BASELINE="$baseline_porc" python3 - <<'PY'
 import json, os, subprocess
 
 root = os.environ["ROOT"]
+baseline_raw = os.environ.get("BASELINE") or ""
 
 def clean_rel(p: str) -> str:
     """Normalize repo-relative path. NEVER use lstrip('./') — that strips dots from .dual-agent."""
@@ -558,6 +565,19 @@ def clean_rel(p: str) -> str:
     while p.startswith("./"):
         p = p[2:]
     return p
+
+def parse_porc(text: str) -> dict:
+    """path -> full porcelain line (status)."""
+    m = {}
+    for ln in (text or "").splitlines():
+        if not ln.strip():
+            continue
+        path = ln[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        path = clean_rel(path)
+        m[path] = ln
+    return m
 
 prefixes = []
 for p in json.loads(os.environ.get("PATHS_JSON") or "[]"):
@@ -569,11 +589,18 @@ for p in json.loads(os.environ.get("PATHS_JSON") or "[]"):
 # Harness / orchestration surfaces — never success, never trespass.
 noise_prefixes = (".dual-agent/", "ledger/")
 noise_names = ("HANDOFF.md", "PLAN.md", "WORK.json", "MEMORY.md")
+# Common local artifacts that must never fail a package
+noise_suffixes = ("_preview.png", ".pyc")
+noise_contains = ("/__pycache__/",)
 
 def kind(rel: str) -> str:
     rel = clean_rel(rel)
     base = rel.rsplit("/", 1)[-1]
     if base in noise_names or rel in noise_names:
+        return "noise"
+    if any(rel.endswith(s) for s in noise_suffixes):
+        return "noise"
+    if any(s in ("/" + rel) or s in rel for s in noise_contains):
         return "noise"
     if any(rel == n.rstrip("/") or rel.startswith(n) for n in noise_prefixes):
         return "noise"
@@ -583,7 +610,7 @@ def kind(rel: str) -> str:
         return "owned"
     return "trespass"
 
-owned, trespass, all_non_noise = [], [], []
+before = parse_porc(baseline_raw)
 try:
     out = subprocess.check_output(
         ["git", "status", "--porcelain", "-uall"],
@@ -591,13 +618,16 @@ try:
     )
 except Exception:
     out = ""
-for ln in out.splitlines():
-    if not ln.strip():
-        continue
-    path = ln[3:].strip()
-    if " -> " in path:
-        path = path.split(" -> ", 1)[1].strip()
-    path = path.strip().strip('"')
+after = parse_porc(out)
+
+# Only paths that are NEW or CHANGED since package start (delta).
+delta_paths = []
+for path, ln in after.items():
+    if path not in before or before[path] != ln:
+        delta_paths.append(path)
+
+owned, trespass, all_non_noise = [], [], []
+for path in sorted(delta_paths):
     k = kind(path)
     if k == "owned":
         owned.append(path)
@@ -605,7 +635,7 @@ for ln in out.splitlines():
     elif k == "trespass":
         trespass.append(path)
         all_non_noise.append(path)
-print(json.dumps({"owned": owned, "trespass": trespass, "all": all_non_noise}))
+print(json.dumps({"owned": owned, "trespass": trespass, "all": all_non_noise, "delta": delta_paths}))
 PY
     )"
     package_changes="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print("\n".join(json.load(sys.stdin).get("owned")or[]))')"
