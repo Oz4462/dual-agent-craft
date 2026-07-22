@@ -30,7 +30,9 @@
     "branch": "feat/poc",
     "integrate_strategy": "same_branch_commits",
     "max_turns_per_package": 30,
-    "stop_on_package_fail": true
+    "stop_on_package_fail": true,
+    "fail_closed_no_files": true,
+    "fail_closed_comment": "Worker CLI exit 0 without filesystem changes → package status=failed (never done). Commit required after writes."
   },
 
   "decompose": {

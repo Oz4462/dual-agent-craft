@@ -124,11 +124,27 @@ EOF
   [ "$status" -ne 0 ]
 }
 
-@test "phase_agent mapping is Claude/Grok/gate structured" {
+@test "phase_agent mapping includes team-work W + classic CRAFT" {
   [ "$(coord get phase_agent.C)" = "claude" ]
+  [ "$(coord get phase_agent.W)" = "team" ]
   [ "$(coord get phase_agent.R)" = "grok" ]
   [ "$(coord get phase_agent.G)" = "gate" ]
   [ "$(coord get phase_agent.A)" = "claude" ]
   [ "$(coord get phase_agent.F)" = "claude" ]
   [ "$(coord get phase_agent.T)" = "gate" ]
+  [ "$(coord get phase_next.C)" = "W" ]
+  [ "$(coord get baton_after_phase.C)" = "team" ]
+  [ "$(coord get baton_after_phase.W)" = "gate" ]
+}
+
+@test "handoff_append honors explicit next baton/phase (no split-brain)" {
+  make_repo "$SCRATCH/repo"
+  cd "$SCRATCH/repo"
+  # shellcheck source=/dev/null
+  source "$HARNESS_ROOT/lib/coordination.sh"
+  coordination_handoff_append "claude" "C" $'- note\n- phase complete.' "team" "W"
+  grep -q '^BATON: team' HANDOFF.md
+  grep -q '^PHASE: W' HANDOFF.md
+  grep -q 'BATON -> team' HANDOFF.md
+  cd - >/dev/null
 }

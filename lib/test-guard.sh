@@ -14,12 +14,16 @@
 #
 # Usage:
 #   lib/test-guard.sh --poc feat/poc --base main [--extra-pattern '<regex>'] [--out FILE]
+#   lib/test-guard.sh ... --allow-from-work ledger/WORK.json
+#     Team-mode: allow test/verify files only when WORK.json has a Claude
+#     package (kind=tests or allows_tests) whose paths cover that file.
+#     Grok/Codex test edits remain BLOCKED (PROTOCOL invariant 7).
 set -uo pipefail
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$_HERE/common.sh"
 
-POC="feat/poc"; BASE="main"; DIFF_FILES=""; EXTRA=""; OUTFILE=""
+POC="feat/poc"; BASE="main"; DIFF_FILES=""; EXTRA=""; OUTFILE=""; ALLOW_WORK=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)   usage "$0"; exit 0;;
@@ -28,6 +32,7 @@ while [[ $# -gt 0 ]]; do
     --diff-files)    DIFF_FILES="${2:?value required for $1}"; shift 2;;
     --extra-pattern) EXTRA="${2:?value required for $1}"; shift 2;;
     --out)           OUTFILE="${2:?value required for $1}"; shift 2;;
+    --allow-from-work) ALLOW_WORK="${2:?value required for $1}"; shift 2;;
     *) fail "test-guard: unknown arg '$1'";;
   esac
 done
@@ -63,20 +68,76 @@ for f in "${files[@]:-}"; do
   if printf '%s' "$f" | grep -qiE "$PATTERN"; then violations+=("$f"); fi
 done
 
+# Team-mode allowlist: drop violations covered by Claude-owned test packages in WORK.json
+allowed=()
+if [[ -n "$ALLOW_WORK" && -f "$ALLOW_WORK" && ${#violations[@]} -gt 0 ]]; then
+  mapfile -t filtered < <(
+    WORK="$ALLOW_WORK" python3 - "${violations[@]}" <<'PY'
+import json, os, sys
+work = json.load(open(os.environ["WORK"], encoding="utf-8"))
+pkgs = work.get("packages") or []
+# Claude (architect) may pin tests when package is tests / allows_tests
+allow_prefixes = []
+for p in pkgs:
+    if p.get("assignee") not in ("claude", "architect"):
+        continue
+    if not (p.get("allows_tests") or p.get("kind") == "tests"):
+        continue
+    for path in p.get("paths") or []:
+        path = str(path).strip().lstrip("./")
+        if not path:
+            continue
+        allow_prefixes.append(path if path.endswith("/") else path + "/")
+
+def allowed(rel: str) -> bool:
+    rel = rel.lstrip("./")
+    return any(rel == p.rstrip("/") or rel.startswith(p) for p in allow_prefixes)
+
+still = []
+for v in sys.argv[1:]:
+    if not v:
+        continue
+    if allow_prefixes and allowed(v):
+        print(f"ALLOW\t{v}")
+    else:
+        print(f"BLOCK\t{v}")
+        still.append(v)
+PY
+  )
+  violations=()
+  for line in "${filtered[@]:-}"; do
+    case "$line" in
+      ALLOW$'\t'*) allowed+=("${line#*$'\t'}") ;;
+      BLOCK$'\t'*) violations+=("${line#*$'\t'}") ;;
+    esac
+  done
+fi
+
 [[ -z "$OUTFILE" ]] && { ledger="$(repo_root)/ledger"; mkdir -p "$ledger"; OUTFILE="$ledger/TEST-GUARD.json"; }
 verdict="PASS"; [[ ${#violations[@]} -gt 0 ]] && verdict="BLOCK"
-python3 - "$OUTFILE" "$BASE" "$POC" "$verdict" "$(iso_now)" "${violations[@]:-}" <<'PY'
+python3 - "$OUTFILE" "$BASE" "$POC" "$verdict" "$(iso_now)" \
+  "$(printf '%s\n' "${allowed[@]:-}" | paste -sd, -)" \
+  "${violations[@]:-}" <<'PY'
 import sys, json
-out, base, poc, verdict, stamp = sys.argv[1:6]
-viol = [v for v in sys.argv[6:] if v]
+out, base, poc, verdict, stamp, allowed_csv = sys.argv[1:7]
+viol = [v for v in sys.argv[7:] if v]
+allowed = [a for a in allowed_csv.split(",") if a]
 open(out,"w",encoding="utf-8").write(json.dumps(
-  {"base":base,"poc":poc,"verdict":verdict,"violations":viol,"stamp":stamp}, indent=2))
+  {"base":base,"poc":poc,"verdict":verdict,"violations":viol,
+   "allowed_team_tests":allowed,"stamp":stamp}, indent=2))
 PY
 
 if [[ ${#violations[@]} -gt 0 ]]; then
   printf '%stest-guard: BLOCK -- builder touched test/verify files (invariant 7):%s\n' "$C_RED" "$C_RESET"
   for v in "${violations[@]}"; do printf '%s  ! %s%s\n' "$C_RED" "$v" "$C_RESET"; done
+  if [[ ${#allowed[@]} -gt 0 ]]; then
+    printf '  (note: some Claude team-test paths were allowed separately)\n'
+  fi
   exit 2
 fi
-ok "test-guard: PASS -- no test/verify files modified by the builder."
+if [[ ${#allowed[@]} -gt 0 ]]; then
+  ok "test-guard: PASS -- Claude team test packages allowed (${#allowed[@]} file(s)); no builder trespass."
+else
+  ok "test-guard: PASS -- no test/verify files modified by the builder."
+fi
 exit 0

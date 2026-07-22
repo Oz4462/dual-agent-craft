@@ -301,8 +301,10 @@ advance() {
     *) agent="$(coordination_phase_agent "$phase")"
        baton="$(coordination_baton_after "$phase")" ;;
   esac
+  # Pass explicit next baton/phase so HANDOFF header matches run-state (no split-brain).
   coordination_handoff_append "$agent" "$phase" \
-    "- $note"$'\n'"- phase complete."$'\n'"- adaptive: builder=$BUILDER assessor=$ASSESS_VENDOR profile=${PROFILE_RESOLVED:-$PROFILE} team-work=$TEAM_WORK"
+    "- $note"$'\n'"- phase complete."$'\n'"- adaptive: builder=$BUILDER assessor=$ASSESS_VENDOR profile=${PROFILE_RESOLVED:-$PROFILE} team-work=$TEAM_WORK" \
+    "$baton" "$next"
   coordination_state_set_phase "$next" "$baton" "completed_$phase"
   ok "phase $phase done → next=$next baton=$baton (agent was $agent)"
 }
@@ -442,9 +444,15 @@ if should_run_phase G; then
   fi
 
   if [[ "$TEST_GUARD" == true ]]; then
-    "$_HERE/lib/test-guard.sh" --poc "$POC_BRANCH" --base "$BASE_BRANCH" \
+    tg_args=(--poc "$POC_BRANCH" --base "$BASE_BRANCH")
+    # Team-work: Claude-owned test packages in WORK.json are allowed (architect pins tests).
+    # Grok/Codex test edits remain blocked (invariant 7).
+    if [[ "$TEAM_WORK" == true && -f "$_HERE/ledger/WORK.json" ]]; then
+      tg_args+=(--allow-from-work "$_HERE/ledger/WORK.json")
+    fi
+    "$_HERE/lib/test-guard.sh" "${tg_args[@]}" \
       || fail "test-guard BLOCKED — builder touched tests (invariant 7)."
-    ok "test-guard clean (builder did not edit tests)."
+    ok "test-guard clean (builder did not edit tests; team Claude tests allowed if WORK.json)."
   else
     warn "test-guard skipped (--no-test-guard)."
   fi
@@ -471,7 +479,8 @@ if should_run_phase A; then
   fi
   coordination_require_baton "$ASSESS_VENDOR"
 
-  review_args=(--plan "$PLAN" --poc "$POC_BRANCH" --base "$BASE_BRANCH" --assess-vendor "$ASSESS_VENDOR")
+  review_args=(--plan "$PLAN" --poc "$POC_BRANCH" --base "$BASE_BRANCH"
+               --assess-vendor "$ASSESS_VENDOR" --rebutter "$BUILDER")
   [[ -n "$MODEL" ]] && review_args+=(--model "$MODEL")
   "$_HERE/dual-review.sh" "${review_args[@]}" || fail "dual-review failed."
 

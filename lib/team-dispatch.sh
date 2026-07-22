@@ -332,6 +332,44 @@ work["roster"] = {
     w: [p["id"] for p in packages if p.get("assignee") == w]
     for w in workers_cfg
 }
+
+# Path-disjointness validator (fail-closed): no prefix overlap between packages
+# unless package has shared:true (rare; not used by default decompose).
+def norm_prefixes(pkg):
+    out = []
+    for p in pkg.get("paths") or []:
+        p = str(p).strip().lstrip("./")
+        if not p:
+            continue
+        out.append(p if p.endswith("/") else p + "/")
+    return out
+
+def overlaps(a, b):
+    for x in a:
+        for y in b:
+            if x == y or x.startswith(y) or y.startswith(x):
+                return True
+    return False
+
+overlap_errs = []
+for i in range(len(packages)):
+    if packages[i].get("shared"):
+        continue
+    pi = norm_prefixes(packages[i])
+    for j in range(i + 1, len(packages)):
+        if packages[j].get("shared"):
+            continue
+        pj = norm_prefixes(packages[j])
+        if pi and pj and overlaps(pi, pj):
+            overlap_errs.append(
+                f"{packages[i].get('id')} paths {pi} overlap {packages[j].get('id')} paths {pj}"
+            )
+if overlap_errs:
+    print("BLOCKED: path-disjoint violation:", file=sys.stderr)
+    for e in overlap_errs:
+        print(f"  ! {e}", file=sys.stderr)
+    sys.exit(2)
+
 open(os.environ["OUT"], "w", encoding="utf-8").write(json.dumps(work, indent=2) + "\n")
 print(json.dumps({"out": os.environ["OUT"], "assignment": assigned_counts, "roster": work["roster"]}))
 # fairness check
@@ -340,6 +378,10 @@ if missing and len(packages) >= len(available):
     print(f"WARN: workers without packages: {missing}", file=sys.stderr)
     sys.exit(2)
 PY
+  local assign_rc=$?
+  if [[ $assign_rc -ne 0 ]]; then
+    fail "assign failed (python exit=$assign_rc) — see path-disjoint / fairness errors above"
+  fi
   ok "assigned → $out"
 }
 
@@ -388,6 +430,32 @@ PY
     return 0
   fi
 
+  # _team_mark_package <work> <idx> <status> [evidence]
+  # Optional env: FILES_JSON='["a"]' COMMIT_SHA=abc (evidence schema)
+  _team_mark_package() {
+    WORK="$1" IDX="$2" ST="$3" EV="${4:-}" python3 - <<'PY'
+import json, os
+from datetime import datetime, timezone
+w = json.load(open(os.environ["WORK"], encoding="utf-8"))
+p = w["packages"][int(os.environ["IDX"])]
+p["status"] = os.environ["ST"]
+if os.environ.get("EV"):
+    p["evidence"] = os.environ["EV"]
+fj = os.environ.get("FILES_JSON", "").strip()
+if fj:
+    try:
+        p["files_changed"] = json.loads(fj)
+    except Exception:
+        p["files_changed"] = []
+cs = os.environ.get("COMMIT_SHA", "").strip()
+if cs:
+    p["commit_sha"] = cs
+if os.environ["ST"] in ("done", "failed"):
+    p["finished_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+open(os.environ["WORK"], "w", encoding="utf-8").write(json.dumps(w, indent=2) + "\n")
+PY
+  }
+
   # Sequential path-locked execution
   for ((i=0; i<n; i++)); do
     local id assignee title kind paths_json status
@@ -407,12 +475,7 @@ PY
     command -v "$assignee" >/dev/null 2>&1 || fail "worker CLI not in PATH: $assignee (package $id)"
 
     # Mark in progress
-    WORK="$work" IDX="$i" python3 - <<'PY'
-import json,os
-w=json.load(open(os.environ["WORK"],encoding="utf-8"))
-w["packages"][int(os.environ["IDX"])]["status"]="in_progress"
-open(os.environ["WORK"],"w",encoding="utf-8").write(json.dumps(w,indent=2)+"\n")
-PY
+    _team_mark_package "$work" "$i" "in_progress" "worker=$assignee started"
 
     local pf tmpdir
     tmpdir="$root/.dual-agent/tmp"
@@ -442,6 +505,8 @@ Rules:
 - Smallest correct implementation for THIS package only.
 - Do not rewrite other packages' directories.
 - No secrets. No invented dependencies outside PLAN allow-list.
+- You MUST create or modify at least one real file under OWNED PATHS.
+- Exit 0 with no filesystem changes is a FAILURE (harness fail-closed).
 - Commit is done by the harness after you finish; just write files.
 
 === FULL CONTRACT (PLAN.md) ===
@@ -472,33 +537,109 @@ EOF
     esac
 
     if [[ $rc -ne 0 ]]; then
-      WORK="$work" IDX="$i" python3 - <<'PY'
-import json,os
-w=json.load(open(os.environ["WORK"],encoding="utf-8"))
-w["packages"][int(os.environ["IDX"])]["status"]="failed"
-open(os.environ["WORK"],"w",encoding="utf-8").write(json.dumps(w,indent=2)+"\n")
-PY
+      _team_mark_package "$work" "$i" "failed" "worker=$assignee exit=$rc"
       fail "team package $id failed (worker=$assignee exit=$rc)"
     fi
 
-    # Commit package work if dirty
-    if [[ -n "$(git -C "$root" status --porcelain 2>/dev/null || true)" ]]; then
-      git -C "$root" add -A
-      git -C "$root" commit -q -m "team($assignee): $id $title [no-push]" \
-        || warn "commit skipped for $id (nothing staged?)"
+    # Classify git changes: owned vs noise vs trespass.
+    # - noise (.dual-agent/, ledger/) never counts as success or trespass
+    # - owned paths must have ≥1 change (fail-closed empty)
+    # - non-noise outside owned paths = trespass (fail-closed)
+    local classify_json package_changes trespass_changes
+    classify_json="$(
+      PATHS_JSON="$paths_json" ROOT="$root" python3 - <<'PY'
+import json, os, subprocess
+
+root = os.environ["ROOT"]
+
+def clean_rel(p: str) -> str:
+    """Normalize repo-relative path. NEVER use lstrip('./') — that strips dots from .dual-agent."""
+    p = str(p).strip().strip('"')
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+prefixes = []
+for p in json.loads(os.environ.get("PATHS_JSON") or "[]"):
+    p = clean_rel(p)
+    if not p:
+        continue
+    prefixes.append(p if p.endswith("/") else p + "/")
+
+# Harness / orchestration surfaces — never success, never trespass.
+noise_prefixes = (".dual-agent/", "ledger/")
+noise_names = ("HANDOFF.md", "PLAN.md", "WORK.json", "MEMORY.md")
+
+def kind(rel: str) -> str:
+    rel = clean_rel(rel)
+    base = rel.rsplit("/", 1)[-1]
+    if base in noise_names or rel in noise_names:
+        return "noise"
+    if any(rel == n.rstrip("/") or rel.startswith(n) for n in noise_prefixes):
+        return "noise"
+    if not prefixes:
+        return "owned"
+    if any(rel == p.rstrip("/") or rel.startswith(p) for p in prefixes):
+        return "owned"
+    return "trespass"
+
+owned, trespass, all_non_noise = [], [], []
+try:
+    out = subprocess.check_output(
+        ["git", "status", "--porcelain", "-uall"],
+        cwd=root, text=True, stderr=subprocess.DEVNULL,
+    )
+except Exception:
+    out = ""
+for ln in out.splitlines():
+    if not ln.strip():
+        continue
+    path = ln[3:].strip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1].strip()
+    path = path.strip().strip('"')
+    k = kind(path)
+    if k == "owned":
+        owned.append(path)
+        all_non_noise.append(path)
+    elif k == "trespass":
+        trespass.append(path)
+        all_non_noise.append(path)
+print(json.dumps({"owned": owned, "trespass": trespass, "all": all_non_noise}))
+PY
+    )"
+    package_changes="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print("\n".join(json.load(sys.stdin).get("owned")or[]))')"
+    trespass_changes="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print("\n".join(json.load(sys.stdin).get("trespass")or[]))')"
+
+    if [[ -n "${trespass_changes//[$'\t\r\n ']/}" ]]; then
+      FILES_JSON="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin).get("trespass")or[]))')" \
+        _team_mark_package "$work" "$i" "failed" \
+        "fail-closed: trespass outside owned paths (worker=$assignee): $(printf '%s' "$trespass_changes" | tr '\n' ' ')"
+      fail "team package $id trespass (worker=$assignee wrote outside owned paths) — fail-closed: $trespass_changes"
     fi
 
-    WORK="$work" IDX="$i" WHO="$assignee" python3 - <<'PY'
-import json,os
-from datetime import datetime, timezone
-w=json.load(open(os.environ["WORK"],encoding="utf-8"))
-p=w["packages"][int(os.environ["IDX"])]
-p["status"]="done"
-p["evidence"]=f"worker={os.environ['WHO']} finished"
-p["finished_at"]=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-open(os.environ["WORK"],"w",encoding="utf-8").write(json.dumps(w,indent=2)+"\n")
-PY
-    ok "$id done by $assignee"
+    if [[ -z "${package_changes//[$'\t\r\n ']/}" ]]; then
+      _team_mark_package "$work" "$i" "failed" \
+        "fail-closed: worker=$assignee exit=0 but no filesystem changes under package paths"
+      fail "team package $id produced no file changes (worker=$assignee) — fail-closed (done without files is forbidden)"
+    fi
+
+    # Commit package work (include full dirty tree — standard team integrate)
+    local commit_sha=""
+    if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      git -C "$root" add -A
+      git -C "$root" commit -q -m "team($assignee): $id $title [no-push]" \
+        || {
+          _team_mark_package "$work" "$i" "failed" "worker=$assignee wrote files but commit failed"
+          fail "team package $id: commit failed after writes (worker=$assignee)"
+        }
+      commit_sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+
+    FILES_JSON="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin).get("owned")or[]))')" \
+      COMMIT_SHA="$commit_sha" \
+      _team_mark_package "$work" "$i" "done" "worker=$assignee finished + files committed"
+    ok "$id done by $assignee (files=$(printf '%s' "$package_changes" | wc -l) sha=${commit_sha:-n/a})"
   done
 
   WORK="$work" python3 - <<'PY'

@@ -21,6 +21,33 @@ guard() { run "$HARNESS_ROOT/lib/test-guard.sh" --out "$SCRATCH/tg.json" "$@"; }
   [ "$(jfield "$SCRATCH/tg.json" violations.0)" = "tests/test_main.py" ]
 }
 
+@test "team-mode: Claude-owned tests package allows tests/ paths" {
+  cat >"$SCRATCH/WORK.json" <<'EOF'
+{
+  "packages": [
+    {"id":"WP-T","kind":"tests","assignee":"claude","allows_tests":true,"paths":["tests/","verify/"]}
+  ]
+}
+EOF
+  guard --diff-files $'src/main.py\ntests/test_main.py' --allow-from-work "$SCRATCH/WORK.json"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/tg.json" verdict)" = "PASS" ]
+}
+
+@test "team-mode: Grok cannot claim tests even if WORK has claude package — non-covered path still BLOCK" {
+  cat >"$SCRATCH/WORK.json" <<'EOF'
+{
+  "packages": [
+    {"id":"WP-T","kind":"tests","assignee":"claude","allows_tests":true,"paths":["tests/"]}
+  ]
+}
+EOF
+  # verify/ not in Claude paths → still blocked
+  guard --diff-files $'verify/acceptance.sh' --allow-from-work "$SCRATCH/WORK.json"
+  [ "$status" -eq 2 ]
+  [ "$(jfield "$SCRATCH/tg.json" verdict)" = "BLOCK" ]
+}
+
 @test "conftest.py -> BLOCK" {
   guard --diff-files "conftest.py"
   [ "$status" -eq 2 ]

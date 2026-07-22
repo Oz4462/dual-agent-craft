@@ -268,17 +268,25 @@ coordination_check_builder_paths() {
 }
 
 # --- HANDOFF.md human ledger -----------------------------------------------
-# coordination_handoff_append <agent> <phase> <body-lines>
-# Header BATON = who may act NEXT (baton_after phase), not who just finished.
-# Header PHASE = next phase (phase_next), so the staffelstab is always current.
+# coordination_handoff_append <agent> <phase> <body-lines> [next_baton] [next_phase]
+# Header BATON = who may act NEXT, Header PHASE = next phase.
+# Optional args 4–5 override static config (required for adaptive team-work:
+# after C, baton is "team" and next phase is "W" when --team-work is on;
+# after C with --no-team-work, baton is builder and next is R).
 coordination_handoff_append() {
   local agent="$1" phase="$2" body="$3"
   local root hf ts next_baton next_phase
   root="$(_coord_root)"
   hf="$root/$(coordination_get defaults.handoff HANDOFF.md)"
   ts="$(iso_now)"
-  next_baton="$(coordination_baton_after "$phase")"
-  next_phase="$(coordination_next_phase "$phase")"
+  next_baton="${4:-}"
+  next_phase="${5:-}"
+  if [[ -z "$next_baton" ]]; then
+    next_baton="$(coordination_baton_after "$phase")"
+  fi
+  if [[ -z "$next_phase" ]]; then
+    next_phase="$(coordination_next_phase "$phase")"
+  fi
   if [[ ! -f "$hf" ]]; then
     # Bootstrap from template if present.
     local tmpl="$root/HANDOFF.template.md"
@@ -311,7 +319,7 @@ PY
   {
     printf '\n### [%s] %s — %s\n' "$ts" "$agent" "$phase"
     printf '%s\n' "$body"
-    printf -- '- BATON -> %s\n' "$next_baton"
+    printf -- '- BATON -> %s  (next phase %s)\n' "$next_baton" "$next_phase"
   } >>"$hf"
 }
 

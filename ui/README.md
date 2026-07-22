@@ -25,10 +25,17 @@ Wichtig: die Seite über **http://127.0.0.1:8787/** öffnen, **nicht** per `file
 | **Starten** (echt) | Worker schreiben Dateien; der Harness committet lokal (`[no-push]`). |
 | **Merge überspringen** (Default) | Ergebnis bleibt auf dem Arbeits-Branch — `main` wird **nicht** verändert. |
 
-Nach jedem echten Team-Lauf zeigt das Cockpit einen **Persistenz-Check**:
-er vergleicht `ledger/WORK.json` mit der git-Realität und **warnt**, wenn ein
-Paket „done" ist, aber weder ein team-Commit noch geänderte Dateien existieren
-(Worker-CLI mit Exit 0, aber ohne Writes).
+### Fail-closed (Harness, ab jetzt)
+
+`lib/team-dispatch.sh` markiert ein Package **nie** als `done`, wenn der
+Worker mit Exit 0 endet **ohne** echte Dateiänderungen unter den **owned paths**.
+Dann: `status=failed`, Evidence `fail-closed: … no filesystem changes`, Run stoppt.
+
+Harness-Noise (`.dual-agent/`, `ledger/`) zählt **nicht** als Implementierung.
+
+Nach jedem echten Team-Lauf zeigt das Cockpit zusätzlich einen **Persistenz-Check**
+(`/api/persistence`): er vergleicht `ledger/WORK.json` mit git und warnt bei
+historischen „done ohne Commit/Dateien“-Fällen.
 
 ## Funktionen
 

@@ -18,9 +18,10 @@
     "harden": "feat/harden"
   },
 
-  "phases": ["C", "R", "G", "A", "F", "T"],
+  "phases": ["C", "W", "R", "G", "A", "F", "T"],
   "phase_names": {
     "C": "Contract",
+    "W": "Team-Work",
     "R": "Render",
     "G": "Guards",
     "A": "Assess",
@@ -29,6 +30,7 @@
   },
   "phase_agent": {
     "C": "claude",
+    "W": "team",
     "R": "grok",
     "G": "gate",
     "A": "claude",
@@ -36,7 +38,8 @@
     "T": "gate"
   },
   "phase_next": {
-    "C": "R",
+    "C": "W",
+    "W": "G",
     "R": "G",
     "G": "A",
     "A": "F",
@@ -44,7 +47,8 @@
     "T": "done"
   },
   "baton_after_phase": {
-    "C": "grok",
+    "C": "team",
+    "W": "gate",
     "R": "gate",
     "G": "claude",
     "A": "claude",
