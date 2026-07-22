@@ -18,9 +18,12 @@ source "$_HERE/lib/common.sh"
 
 PLAN="./PLAN.md"; VARIANTS=3; BRANCH="feat/poc"; INTO="main"; MODEL=""
 MAX_TURNS=40; ADAPTIVE=false; VERIFY=""; DRYRUN=false; BUILDER="grok"
+SCOUT=false; SCOUT_MODEL="${DUAL_AGENT_SCOUT_MODEL:-qwen2.5-coder:7b}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)   usage "$0"; exit 0;;
+    --scout)     SCOUT=true; shift;;                            # try zero-quota Ollama first (needs --verify)
+    --scout-model) SCOUT_MODEL="${2:?value required for $1}"; shift 2;;
     --plan)      PLAN="${2:?value required for $1}"; shift 2;;
     --variants)  VARIANTS="${2:?value required for $1}"; shift 2;;
     --branch)    BRANCH="${2:?value required for $1}"; shift 2;;
@@ -126,12 +129,60 @@ render() {
   fi
 }
 
+# --- Scout rung (audit P1): zero-quota Ollama tries FIRST when --scout + --verify.
+# The scout emits strict JSON {relpath: content}; we write it into the worktree and
+# self-gate on --verify. Only on unreachable/parse-fail/verify-red do we fall
+# through to the paid builder. Never merge-gating (that stays with the frontier eval).
+scout_won=false
+if [[ "$SCOUT" == true ]]; then
+  if [[ -z "$VERIFY" ]]; then
+    warn "Scout    : --scout ignored (needs --verify to self-gate — refusing to trust an ungated local build)."
+  else
+    log "Scout    : trying zero-quota Ollama ($SCOUT_MODEL) first ..."
+    scoutfile="$tmpdir/scout-$stamp.txt"
+    { cat "$promptfile"; printf '\n\nOutput ONLY a strict JSON object mapping each relative file path to its FULL file content. No prose, no markdown fences.\n'; } > "$scoutfile"
+    sres="$("$_HERE/lib/local-call.sh" --prompt-file "$scoutfile" --json --model "$SCOUT_MODEL" \
+             ${DUAL_AGENT_OLLAMA_ENDPOINT:+--endpoint "$DUAL_AGENT_OLLAMA_ENDPOINT"} 2>/dev/null || true)"
+    stext="$(printf '%s' "$sres" | json_field_stdin text 2>/dev/null || true)"
+    if [[ -n "$stext" ]] && printf '%s' "$stext" | WT="$wtpath" python3 -c '
+import sys, json, os
+wt = os.environ["WT"]
+try: m = json.loads(sys.stdin.read())
+except Exception: sys.exit(1)
+if not isinstance(m, dict): sys.exit(1)
+for path, content in m.items():
+    # reject traversal / absolute paths (untrusted local-model output)
+    if not isinstance(path, str) or path.startswith(("/",)) or ".." in path.split("/"):
+        sys.exit(1)
+    full = os.path.join(wt, path)
+    os.makedirs(os.path.dirname(full) or wt, exist_ok=True)
+    open(full, "w", encoding="utf-8").write(content if isinstance(content, str) else json.dumps(content))
+sys.exit(0)
+'; then
+      if ( cd "$wtpath" && eval "$VERIFY" ) >/dev/null 2>&1; then
+        scout_won=true
+        ok "Scout    : Ollama POC PASSED acceptance -> saved a paid builder call (\$0)."
+      else
+        warn "Scout    : Ollama POC failed acceptance -> falling through to $BUILDER."
+        git -C "$wtpath" checkout -- . >/dev/null 2>&1 || true
+        git -C "$wtpath" clean -fd >/dev/null 2>&1 || true
+      fi
+    else
+      warn "Scout    : Ollama unreachable/invalid JSON -> falling through to $BUILDER."
+    fi
+  fi
+fi
+
 # Adaptive: render N=1 first, escalate to full -Variants only on failed acceptance.
 # Codex has no best-of-n -> always effective_n=1.
 effective_n="$VARIANTS"
 { [[ "$ADAPTIVE" == true && "$VARIANTS" -gt 1 ]] || [[ "$BUILDER" == codex ]]; } && effective_n=1
-log "Render   : best-of-$effective_n$([[ "$ADAPTIVE" == true ]] && echo ' (adaptive: N=1 first)')"
-result="$(render "$effective_n")"
+if [[ "$scout_won" == true ]]; then
+  result='{"exit_code":0,"text":"scout (ollama) build accepted"}'
+else
+  log "Render   : best-of-$effective_n$([[ "$ADAPTIVE" == true ]] && echo ' (adaptive: N=1 first)')"
+  result="$(render "$effective_n")"
+fi
 grok_exit="$(printf '%s' "$result" | json_field_stdin exit_code 2>/dev/null || echo 1)"
 grok_exit="${grok_exit:-1}"
 printf '%s' "$result" | python3 -c "import sys,json;d=json.load(sys.stdin);print('\nGrok result (noise-free):');print(d['text'].strip()[:2000])" 2>/dev/null || true

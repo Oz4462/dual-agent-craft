@@ -90,3 +90,74 @@ EOF
   [ ! -d "$REPO/sub/wt-feat-poc" ]
   cd - >/dev/null
 }
+
+# --- Ollama scout rung (#3) -------------------------------------------------
+
+# start a fake ollama that returns a fixed {path:content} JSON map; echoes port.
+start_fake_ollama() {
+  local mapjson="$1"
+  MAP="$mapjson" python3 - "$SCRATCH/oport" <<'PY' &
+import http.server, json, sys, os
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get('Content-Length',0)))
+        body=json.dumps({"message":{"content":os.environ["MAP"]}}).encode()
+        self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers(); self.wfile.write(body)
+    def log_message(self,*a): pass
+srv=http.server.HTTPServer(("127.0.0.1",0),H)
+open(sys.argv[1],"w").write(str(srv.server_address[1])); srv.serve_forever()
+PY
+  FAKE_OLLAMA_PID=$!
+  sleep 0.6
+  export DUAL_AGENT_OLLAMA_ENDPOINT="http://127.0.0.1:$(cat "$SCRATCH/oport")/api/chat"
+}
+stop_fake_ollama() { [[ -n "${FAKE_OLLAMA_PID:-}" ]] && kill "$FAKE_OLLAMA_PID" 2>/dev/null || true; }
+
+@test "scout: --scout without --verify is ignored (falls through to builder)" {
+  mk_grok 0
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-build.sh" --variants 1 --scout --plan "$REPO/PLAN.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"needs --verify"* ]]
+  [ -f "$SCRATCH/grok.argv" ]   # builder still ran
+  cd - >/dev/null
+}
+
+@test "scout: unreachable Ollama falls through to the builder" {
+  mk_grok 0
+  export DUAL_AGENT_OLLAMA_ENDPOINT="http://127.0.0.1:59998/api/chat"
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-build.sh" --variants 1 --scout --verify "true" --plan "$REPO/PLAN.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"falling through"* ]]
+  [ -f "$SCRATCH/grok.argv" ]
+  cd - >/dev/null
+}
+
+@test "scout: a passing Ollama POC SKIPS the paid builder" {
+  # grok that would FAIL the test if it ran
+  cat > "$FAKEBIN/grok" <<'G'
+#!/usr/bin/env bash
+touch "$GROK_RAN_MARK"; echo '{"text":"x"}'; exit 0
+G
+  chmod +x "$FAKEBIN/grok"; export GROK_RAN_MARK="$SCRATCH/grok.ran"
+  start_fake_ollama '{"src/app.py":"ok=1\n"}'
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-build.sh" --variants 1 --scout --verify "test -f src/app.py" --plan "$REPO/PLAN.md"
+  stop_fake_ollama
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"saved a paid builder call"* ]]
+  [ ! -f "$GROK_RAN_MARK" ]      # builder never ran
+  cd - >/dev/null
+}
+
+@test "scout: path-traversal in the local-model JSON is rejected (falls through)" {
+  mk_grok 0
+  start_fake_ollama '{"../evil.txt":"pwned"}'
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-build.sh" --variants 1 --scout --verify "true" --plan "$REPO/PLAN.md"
+  stop_fake_ollama
+  [[ "$output" == *"falling through"* ]] || [[ "$output" == *"unreachable/invalid"* ]]
+  [ ! -f "$SCRATCH/evil.txt" ]   # no write outside the worktree
+  cd - >/dev/null
+}
