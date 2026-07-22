@@ -1,24 +1,19 @@
-"""WP01 core_impl — pure stdlib multiply(a, b).
+"""WP01 — leftover pure stdlib multiply (previous dual-run contract).
 
-PLAN.md §3 Interface-Contract:
+Kept so workspace discovery/tests that still look for ``multiply`` under
+src/pkg* do not break while the active task is VerdiScan. Prefer
+``normalize_barcode`` in barcode.py for this run's core surface.
+
+Contract (historical PLAN Pure-Stdlib Multiply):
   multiply(a: int | float, b: int | float) -> int | float
-  - returns arithmetic product a * b
-  - TypeError on non-numeric args (str, None, list, …)
-    Note: str * int is valid Python (string repeat), so we reject non-numbers
-    explicitly rather than relying only on the * operator.
-  - no side effects, no I/O, no imports
-  - no string conversion, no global state
-
-Owned by package WP01 under src/pkg00/. Root multiply.py is wired by INTEGRATE.
+  - bool rejected (fail-closed; bool subclasses int)
+  - TypeError on non-int/non-float
+  - no imports, no I/O, no side effects
 """
 
 
 def multiply(a: int | float, b: int | float) -> int | float:
-    """Return the arithmetic product of a and b.
-
-    Accepts int or float only (bool is rejected even though it subclasses int).
-    Non-numeric arguments raise TypeError.
-    """
+    """Return the arithmetic product of a and b (int/float only; no bool)."""
     if type(a) is not int and type(a) is not float:
         raise TypeError(
             f"multiply() a must be int or float, not {type(a).__name__}"

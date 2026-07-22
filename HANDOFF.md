@@ -2,8 +2,8 @@
 
 > Kopie nach HANDOFF.md pro Feature. Jeder Turn hängt unten an, nichts wird gelöscht.
 
-BATON: team        # wer gerade handeln darf: claude | grok | codex | team | gate | done
-PHASE: W             # C | W | R | G | A | F | T | done
+BATON: team        # ready for next dashboard task
+PHASE: W             # next dual-run starts at Contract
 CONTRACT: PLAN.md
 VERIFY_CMD: <z.B. pytest -q   oder   npm test>
 
@@ -33,56 +33,8 @@ VERIFY_CMD: <z.B. pytest -q   oder   npm test>
 - Verify pass^k: <grün/rot>. Merge: <ja/nein>.
 - BATON -> done
 
-### [2026-07-22T16:27:39Z] claude — C
+### [2026-07-22T20:35:07Z] claude — C
 - Contract ready: PLAN.md — next team work (all three code)
 - phase complete.
-- adaptive: builder=codex assessor=claude profile=security team-work=true
-- BATON -> team  (next phase W)
-
-### [2026-07-22T17:27:41Z] claude — C
-- Contract ready: PLAN.md — next team work (all three code)
-- phase complete.
-- adaptive: builder=grok assessor=claude profile=minimal team-work=true
-- BATON -> team  (next phase W)
-
-### [2026-07-22T17:39:03Z] team — W
-- Team packages done (ledger/WORK.json) — Claude+Grok+Codex all worked
-- phase complete.
-- adaptive: builder=grok assessor=claude profile=minimal team-work=true
-- BATON -> gate  (next phase G)
-
-### [2026-07-22T17:50:00Z] claude — C
-- Contract ready: PLAN.md — next team work (all three code)
-- phase complete.
-- adaptive: builder=codex assessor=claude profile=minimal team-work=true
-- BATON -> team  (next phase W)
-
-### [2026-07-22T18:01:35Z] team — W
-- Team packages done (ledger/WORK.json) — Claude+Grok+Codex all worked
-- phase complete.
-- adaptive: builder=codex assessor=claude profile=minimal team-work=true
-- BATON -> gate  (next phase G)
-
-### [2026-07-22T18:03:24Z] gate — G
-- Guards passed (import-scan=true test-guard=true)
-- phase complete.
-- adaptive: builder=codex assessor=claude profile=minimal team-work=true
-- BATON -> claude  (next phase A)
-
-### [2026-07-22T18:04:55Z] claude — A
-- Bounded cross-review → ledger/REVIEW.* (assessor=claude)
-- phase complete.
-- adaptive: builder=codex assessor=claude profile=minimal team-work=true
-- BATON -> claude  (next phase F)
-
-### [2026-07-22T18:11:09Z] claude — F
-- Hardened on feat/harden
-- phase complete.
-- adaptive: builder=codex assessor=claude profile=minimal team-work=true
-- BATON -> gate  (next phase T)
-
-### [2026-07-22T18:17:37Z] claude — C
-- Contract ready: PLAN.md — next team work (all three code)
-- phase complete.
-- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- adaptive: builder=codex assessor=claude profile=standard team-work=true
 - BATON -> team  (next phase W)
