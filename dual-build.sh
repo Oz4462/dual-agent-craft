@@ -59,8 +59,11 @@ test-guard will block it). A reviewer will harden your output afterwards.
 $plan_text
 EOF
 
-# worktree path: sibling dir so Grok's --cwd is a clean, isolated tree.
-wtpath="$(dirname "$(pwd)")/wt-${BRANCH//[\/:]/-}"
+# worktree path: sibling of the REPO TOPLEVEL (not $(pwd)) — running dual-build
+# from a subdir would otherwise nest a full checkout INSIDE the repo, which the
+# next WIP `git add -A` would then commit (audit P1). Toplevel is deterministic.
+repo_top="$(git rev-parse --show-toplevel)"
+wtpath="$(dirname "$repo_top")/wt-${BRANCH//[\/:]/-}"
 
 info "=== Dual-Agent / Render (Grok) ==="
 log "Contract : $PLAN"

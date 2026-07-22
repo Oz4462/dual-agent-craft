@@ -66,7 +66,8 @@ build_and_eval() {
   # BEFORE any assignment happens -> $a would be unbound (set -u error).
   local tag="$1" desc="$2"
   local branch="tie-$ISSUE_ID-$tag-$stamp"
-  local wt; wt="$(dirname "$(pwd)")/wt-$branch"
+  local top; top="$(git rev-parse --show-toplevel)"   # sibling of toplevel, not cwd (audit P1)
+  local wt; wt="$(dirname "$top")/wt-$branch"
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
   git branch -D "$branch" >/dev/null 2>&1 || true
   git worktree add -b "$branch" "$wt" "$BASE" >/dev/null 2>&1 || { echo "build-failed 0 0 0"; return; }
@@ -95,6 +96,11 @@ EOF
   "$_HERE/lib/eval-harness.sh" --verify "$VERIFY" --k "$EVAL_K" --cwd "$wt" \
      --out "$evalfile" >/dev/null 2>&1 || true
   t1=$(date +%s); secs=$((t1 - t0))
+  # Commit the built impl to its branch BEFORE removing the worktree (audit P1:
+  # the tie-break used to measure a candidate then destroy it — the winning code
+  # was gone). Branch survives the worktree removal so the winner can be kept.
+  git -C "$wt" add -A >/dev/null 2>&1 || true
+  git -C "$wt" commit -q -m "tie-probe($tag): $ISSUE_ID $stamp" >/dev/null 2>&1 || true
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
   if [[ ! -s "$evalfile" ]]; then echo "eval-failed 0 0 0"; return; fi
   local ppk passes
@@ -134,11 +140,21 @@ open(out,"w").write(json.dumps({
 }, indent=2))
 PY
 
+# Keep the WINNER's branch (its measured impl), delete the loser's (audit P1: the
+# measured winning code must survive; a tie/none keeps both for the architect).
+branch_a="tie-$ISSUE_ID-a-$stamp"; branch_b="tie-$ISSUE_ID-b-$stamp"
+win_branch=""
+case "$winner" in
+  A) win_branch="$branch_a"; git branch -D "$branch_b" >/dev/null 2>&1 || true ;;
+  B) win_branch="$branch_b"; git branch -D "$branch_a" >/dev/null 2>&1 || true ;;
+esac
+git worktree prune >/dev/null 2>&1 || true
+
 info "\n=== Tie-Break done ==="
 log "  A[$a_st]: pass^k=$a_ppk passes=$a_passes ${a_secs}s   |   B[$b_st]: pass^k=$b_ppk passes=$b_passes ${b_secs}s"
 case "$winner" in
   none) fail "NEITHER candidate could be built+measured (A: $a_st, B: $b_st) — no verdict fabricated. Fix the build/eval setup and re-run." ;;
-  tie)  warn "  WINNER: tie (both measured equal) — architect picks on other grounds; recorded." ;;
-  *)    ok "  WINNER: approach $winner (measured, not argued). ledger/TIEBREAK.json" ;;
+  tie)  warn "  WINNER: tie (both measured equal) — architect picks on other grounds; both branches kept ($branch_a, $branch_b)." ;;
+  *)    ok "  WINNER: approach $winner -> branch $win_branch (measured, not argued). ledger/TIEBREAK.json" ;;
 esac
 exit 0

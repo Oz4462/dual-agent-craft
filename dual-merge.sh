@@ -65,6 +65,9 @@ fi
 if [[ -n "$VERIFY" ]]; then
   tmp="$(mktemp -d)/cand"
   git worktree add --detach "$tmp" "$FROM" >/dev/null 2>&1; gitfails "worktree add failed."
+  # Cleanup on ANY exit (incl. INT/TERM -> EXIT): the candidate worktree must not
+  # leak if verify is interrupted (audit P2 worktree-leak class).
+  trap 'git worktree remove --force "$tmp" >/dev/null 2>&1; git worktree prune >/dev/null 2>&1' EXIT
   verify_ok=true
   if [[ "$EVAL_K" -gt 1 ]]; then
     log "\nGraded verify (pass^k, k=$EVAL_K) in candidate: $VERIFY"

@@ -159,6 +159,9 @@ info "[R] Grok answers (1 round, no loop) ..."
 # (deny overrides approve; blocks rm -rf / git push / curl / wget).
 reb_wt="$(mktemp -d)/reb"
 git worktree add --detach "$reb_wt" "$POC" >/dev/null 2>&1 || fail "could not create rebuttal worktree from $POC."
+# Cleanup on ANY exit — the rebuttal worktree must not leak if grok is
+# interrupted (audit P2 worktree-leak class).
+trap 'git worktree remove --force "$reb_wt" >/dev/null 2>&1; git worktree prune >/dev/null 2>&1' EXIT
 deny=('Bash(rm -rf *)' 'Bash(git push *)' 'Bash(curl *)' 'Bash(wget *)')
 deny_args=(); for d in "${deny[@]}"; do deny_args+=(--deny "$d"); done
 rr="$("$_HERE/lib/grok-call.sh" --prompt-file "$rebfile" --cwd "$reb_wt" --max-turns 6 \

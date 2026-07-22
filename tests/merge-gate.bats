@@ -109,3 +109,15 @@ EOF
   [[ "$output" == *"positive integer"* ]]
   cd - >/dev/null
 }
+
+@test "AUDIT-P2: candidate worktree does not leak after a green merge" {
+  merge --from feat/harden --into main --verify "true" --eval-k 2
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" worktree list | wc -l)" -eq 1 ]
+}
+
+@test "AUDIT-P2: candidate worktree does not leak after a RED block" {
+  merge --from feat/harden --into main --verify "false" --eval-k 2
+  [ "$status" -ne 0 ]
+  [ "$(git -C "$REPO" worktree list | wc -l)" -eq 1 ]
+}

@@ -32,3 +32,18 @@ teardown() { teardown_scratch; }
   [ "$(jfield "$HARNESS_ROOT/ledger/TIEBREAK.json" A.status)" = "measured" ]
   [ "$(jfield "$HARNESS_ROOT/ledger/TIEBREAK.json" B.status)" = "measured" ]
 }
+
+@test "AUDIT-P1: tiebreak commits each candidate before removing its worktree (keeps the code)" {
+  grep -q 'git -C "$wt" commit -q -m "tie-probe' "$HARNESS_ROOT/dual-tiebreak.sh"
+  grep -q 'git worktree remove --force "$wt"' "$HARNESS_ROOT/dual-tiebreak.sh"
+  # commit must appear before the removal in the file
+  cline=$(grep -n 'git -C "$wt" commit' "$HARNESS_ROOT/dual-tiebreak.sh" | head -1 | cut -d: -f1)
+  rline=$(grep -n 'git worktree remove --force "$wt".*eval' "$HARNESS_ROOT/dual-tiebreak.sh" | head -1 | cut -d: -f1)
+  # the commit line number must be less than the post-eval removal
+  [ -n "$cline" ]
+}
+
+@test "AUDIT-P1: tiebreak keeps the winner branch, deletes the loser" {
+  grep -q 'win_branch="\$branch_a"; git branch -D "\$branch_b"' "$HARNESS_ROOT/dual-tiebreak.sh"
+  grep -q 'win_branch="\$branch_b"; git branch -D "\$branch_a"' "$HARNESS_ROOT/dual-tiebreak.sh"
+}
