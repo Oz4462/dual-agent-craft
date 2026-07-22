@@ -94,39 +94,57 @@ EOF
 # --- Ollama scout rung (#3) -------------------------------------------------
 
 # start a fake ollama that returns a fixed {path:content} JSON map; writes port file.
-# Portable: wait for the port file (macOS CI is slower than a fixed sleep).
+# Write a real .py file then background it — heredoc+& is flaky under bats on macOS CI
+# (server dies before writing the port file → "port file not ready").
 start_fake_ollama() {
   local mapjson="$1" i
-  rm -f "$SCRATCH/oport"
-  MAP="$mapjson" python3 - "$SCRATCH/oport" <<'PY' &
+  rm -f "$SCRATCH/oport" "$SCRATCH/fake_ollama.py" "$SCRATCH/fake_ollama.err"
+  cat >"$SCRATCH/fake_ollama.py" <<'PY'
 import http.server, json, sys, os
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        self.rfile.read(int(self.headers.get('Content-Length',0)))
-        body=json.dumps({"message":{"content":os.environ["MAP"]}}).encode()
-        self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers(); self.wfile.write(body)
-    def log_message(self,*a): pass
-srv=http.server.HTTPServer(("127.0.0.1",0),H)
-with open(sys.argv[1], "w", encoding="utf-8") as f:
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        body = json.dumps({"message": {"content": os.environ["MAP"]}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+port_path = sys.argv[1]
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+with open(port_path, "w", encoding="utf-8") as f:
     f.write(str(srv.server_address[1]))
     f.flush()
     os.fsync(f.fileno())
 srv.serve_forever()
 PY
+  MAP="$mapjson" python3 "$SCRATCH/fake_ollama.py" "$SCRATCH/oport" \
+    >"$SCRATCH/fake_ollama.out" 2>"$SCRATCH/fake_ollama.err" &
   FAKE_OLLAMA_PID=$!
-  for i in $(seq 1 50); do
+  for i in $(seq 1 100); do
     [[ -s "$SCRATCH/oport" ]] && break
-    # give the background python a moment (and bail if it already died)
     if ! kill -0 "$FAKE_OLLAMA_PID" 2>/dev/null; then
-      echo "start_fake_ollama: server process died before writing port" >&2
+      echo "start_fake_ollama: server died; stderr:" >&2
+      cat "$SCRATCH/fake_ollama.err" >&2 || true
       return 1
     fi
-    sleep 0.1
+    sleep 0.05
   done
-  [[ -s "$SCRATCH/oport" ]] || { echo "start_fake_ollama: port file not ready" >&2; return 1; }
+  [[ -s "$SCRATCH/oport" ]] || {
+    echo "start_fake_ollama: port file not ready after wait; stderr:" >&2
+    cat "$SCRATCH/fake_ollama.err" >&2 || true
+    return 1
+  }
   export DUAL_AGENT_OLLAMA_ENDPOINT="http://127.0.0.1:$(cat "$SCRATCH/oport")/api/chat"
 }
-stop_fake_ollama() { [[ -n "${FAKE_OLLAMA_PID:-}" ]] && kill "$FAKE_OLLAMA_PID" 2>/dev/null || true; }
+stop_fake_ollama() {
+  if [[ -n "${FAKE_OLLAMA_PID:-}" ]]; then
+    kill "$FAKE_OLLAMA_PID" 2>/dev/null || true
+    wait "$FAKE_OLLAMA_PID" 2>/dev/null || true
+    FAKE_OLLAMA_PID=""
+  fi
+}
 
 @test "scout: --scout without --verify is ignored (falls through to builder)" {
   mk_grok 0
