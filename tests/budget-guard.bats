@@ -76,3 +76,20 @@ mk_spend() { # args: lines...
   [ "$status" -ne 0 ]
   [[ "$output" == *"value required for --cap"* ]]
 }
+
+@test "AUDIT-P2: ISO-8601 stamps (2026-07-05T..) are summed for the current month" {
+  ISO="$(date -u +%Y-%m)-05T12:00:00Z"
+  mk_spend "{\"stamp\":\"$ISO\",\"cost_usd\":4.00}" \
+           "{\"stamp\":\"${MONTH}02-000000\",\"cost_usd\":1.00}"
+  run "$HARNESS_ROOT/lib/budget-guard.sh" --cap 100 --spend-file "$SPEND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spent=5.00"* ]]
+}
+
+@test "AUDIT-P2: ISO stamp from a PAST month is excluded" {
+  mk_spend "{\"stamp\":\"2019-01-01T00:00:00Z\",\"cost_usd\":999}" \
+           "{\"stamp\":\"${MONTH}02-000000\",\"cost_usd\":2.00}"
+  run "$HARNESS_ROOT/lib/budget-guard.sh" --cap 100 --spend-file "$SPEND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"spent=2.00"* ]]
+}

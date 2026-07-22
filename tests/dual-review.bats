@@ -134,3 +134,19 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"Assess"*"failed"* ]]
 }
+
+@test "AUDIT-P1(#4): a failed rebuttal call BLOCKS (fail-closed), REVIEW.json not overwritten clean" {
+  stub_claude_issues '[{"id":"I1","severity":"high","file":"src/app.py","kind":"drift","claim":"c","eval_decidable":True}]'
+  # grok stub prints nothing and exits 1 -> rebuttal call must fail the run
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$FAKEBIN/grok"; chmod +x "$FAKEBIN/grok"
+  # seed a prior clean REVIEW.json to prove it is NOT clobbered into a false verdict
+  mkdir -p "$HARNESS_ROOT/ledger"
+  echo '{"verdict":"prior"}' > "$HARNESS_ROOT/ledger/REVIEW.json"
+  cd "$REPO"
+  run "$HARNESS_ROOT/dual-review.sh" --plan PLAN.md --poc feat/poc --base main
+  [ "$status" -ne 0 ]
+  [[ "$output" == *Rebuttal* ]] || [[ "$output" == *BLOCKED* ]]
+  # prior ledger must be untouched (no unsure/clean rewrite on a failed rebuttal)
+  [ "$(jfield "$HARNESS_ROOT/ledger/REVIEW.json" verdict)" = "prior" ]
+  cd - >/dev/null
+}
