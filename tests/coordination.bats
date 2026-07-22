@@ -54,8 +54,14 @@ coord() { "$HARNESS_ROOT/lib/coordination.sh" "$@"; }
   run coord path-denied src/app.py
   [ "$status" -eq 1 ]
   [[ "$output" == *allowed* ]]
+  # dual-*.sh / lib/** are orchestration_exempt (anti false-positive in G/team filter)
+  # but verify/** stays on ownership.grok.never and is NOT exempt → still denied
   run coord path-denied dual-merge.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *allowed* ]]
+  run coord path-denied verify/x.py
   [ "$status" -eq 0 ]
+  [[ "$output" == *denied* ]]
 }
 
 @test "check-builder-paths blocks test file (anti double-work / gate gaming)" {
