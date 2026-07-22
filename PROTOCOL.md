@@ -30,18 +30,61 @@
    Sieger. Der gemessene Gewinner zählt, keine Meinung, kein Dauermediator-Mensch. **Implementiert**
    (`ledger/TIEBREAK.json`; Ranking: pass^k, dann passes, dann Wall-Clock).
 
-## Rollen-Aufteilung (wer macht was)
+## Rollen-Aufteilung (wer macht was) — adaptiv
 
-| Phase | Agent | Worktree/Branch | Output |
-|---|---|---|---|
-| C — Contract | **Claude** | `main` (nur PLAN.md) | `PLAN.md` (Contract + Akzeptanz) |
-| R — Render   | **Grok**   | `feat/poc`  | POC-Varianten (`--best-of-n`), beste gewinnt |
-| A — Assess   | **Claude** | liest `feat/poc` read-only | Review-Report im Ledger |
-| F — Fortify  | **Claude** | `feat/harden` (gebrancht von `feat/poc`) | Tests, Error-Handling, Doku, Security |
-| T — Test     | **Gate**   | `dual-merge.ps1` | Merge `feat/harden` → `main` nur bei grün |
+**Baseline (Standard-Profil)** — gilt, wenn nichts spezielles am Task/PLAN hängt:
 
-Grok und Claude editieren **nie gleichzeitig dieselbe Datei**: Grok ist fertig (Baton zurück),
-bevor Claude `feat/harden` aus `feat/poc` branched.
+| Phase | Function | Default-Agent | Worktree/Branch | Output |
+|---|---|---|---|---|
+| C — Contract | architect | **Claude** | `main` (nur PLAN.md) | `PLAN.md` |
+| R-pre | scout (optional) | **Ollama** | — | $0 first pass, never merge-gating |
+| R — Render | builder | **Grok** (oder **Codex** wenn sandbox/security) | `feat/poc` | POC |
+| G — Guards | guards | **Gate** (deterministisch) | — | import-scan, test-guard, ownership |
+| A — Assess | assessor | **Claude** (≠ builder-vendor) | read-only | `ledger/REVIEW.*` |
+| A2 | rebutter | = builder | — | genau 1 Rebuttal |
+| F — Fortify | hardener | **Claude** (wenn Profil/ fortify) | `feat/harden` | Tests, Harden |
+| F+ | security | **Claude** (wenn risk high) | `feat/harden` | Threat/Security |
+| T — Test | arbiter | **Gate / Eval** | merge | `pass^k` only |
+
+### Phase W — Team Work (alle drei arbeiten)
+
+Nach dem PLAN delegiert der Architect **nicht nur**: Claude, Grok und Codex bekommen
+**path-disjunkte Work Packages** (`ledger/WORK.json` via `lib/team-dispatch.sh`) und **jeder codet**.
+
+| Worker | Typische Pakete |
+|---|---|
+| **Claude** | Tests/Verify + mind. 1 Impl/Security-Paket (Architect + Worker) |
+| **Grok** | Core happy-path Impl |
+| **Codex** | Edge/risky I/O / sandbox-nahe Impl |
+
+```bash
+./lib/team-dispatch.sh run --plan PLAN.md --task "…"          # live
+./lib/team-dispatch.sh run --plan PLAN.md --dry-run           # roster only
+./dual-run.sh --verify "…"                                    # C→W→G→A→… (default)
+./dual-run.sh --no-team-work --verify "…"                     # alter Mono-Builder-Pfad
+```
+
+**Adaptiv (erweitert):** `config/roles.json` + `lib/role-router.sh` wählen Profil und Agents aus
+Task/PLAN-Signalen und mid-run REVIEW:
+
+| Profil | Wann (Signale) | builder | fortify | scout | security |
+|---|---|---|---|---|---|
+| `minimal` | tiny/spike, low risk | grok | off | off | off |
+| `standard` | default | grok | off | off | off |
+| `thorough` | distributed/migration/complex | grok | on | on | on |
+| `security` | auth/secret/payment/token | **codex** | on | off | on |
+| `sandbox` | shell/filesystem/network risk | **codex** | on | off | on |
+
+```bash
+./dual-run.sh --who --task "add OAuth payment"     # show matrix
+./lib/role-router.sh profiles
+./lib/role-router.sh explain --task "…"
+```
+
+Hard invariants (nie adaptiv überschreibbar): assessor-vendor ≠ builder-vendor · arbiter=gate ·
+builder ediert keine Tests · max 1 Rebuttal · scout nie merge-gating.
+
+Grok und Claude editieren **nie gleichzeitig dieselbe Datei**: Baton + exclusive dual-run lock.
 
 ## Gegenseitige Verbesserung (der Compounding-Kanal)
 
@@ -60,13 +103,26 @@ Niemals "der Letzte gewinnt".
 
 ## Ablauf (eine Runde)
 
+**Empfohlen (bash, ein Kommando):** `./dual-run.sh --verify "<test-cmd>"`  
+orchestriert C→R→G→A→[F]→T mit exclusive lock + BATON. Fine-tuning:
+`config/coordination.json` (Rollen, Ownership-Globs, Defaults, anti_overlap).
+Maschinenzustand: `.dual-agent/run-state.json`. Menschliches Ledger: `HANDOFF.md`.
+
 ```
 1. Claude:  PLAN.md schreiben + committen, BATON -> grok
-2. Grok :   dual-build.ps1            (baut feat/poc), BATON -> claude
-3. Claude:  Review feat/poc, dann feat/harden bauen
-4. Gate :   dual-merge.ps1 -Verify "<test-cmd>"   (feat/harden -> main bei grün)
-5. Beide:   SUGGESTIONS in HANDOFF.md -> naechster PLAN.md
+2. Grok :   dual-build.sh             (baut feat/poc), BATON -> gate (Guards)
+3. Gate :   import-scan + test-guard + ownership (deterministisch)
+4. Claude:  dual-review.sh (Assess + 1 Rebuttal), optional Fortify auf feat/harden
+5. Gate :   dual-merge.sh --verify ... --eval-k K --test-guard
+6. Beide:   SUGGESTIONS in HANDOFF.md -> naechster PLAN.md
 ```
+
+Anti-Overlap (strukturell, nicht nur Prompt):
+- **Exclusive dual-run lock** — zweites `./dual-run.sh` blockt, solange eines live ist.
+- **BATON** — Agent darf nur handeln, wenn er den Stab hält (`run-state` + `HANDOFF.md`).
+- **Eine Phase gleichzeitig** — phase machine in `lib/coordination.sh`.
+- **Ownership** — Grok-never-list (tests/, PLAN harness surfaces, dual-*.sh, …);
+  orchestration files (HANDOFF, .dual-agent, ledger) sind exempt.
 
 ## Bounded Cross-Review + Eval-Schiedsrichter (v2, 2026-06-17)
 

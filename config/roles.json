@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "description": "Adaptive who-does-what for Claude↔Grok dual-craft. Static defaults are the baseline; the role-router upgrades profile, vendor, fortify, scout, eval_k, and security from task/PLAN signals and mid-run ledger verdicts — without ever letting builder==assessor or eval be replaced by consensus.",
+
+  "agents": {
+    "claude": {
+      "vendor": "claude",
+      "adapter": "lib/claude-call.sh",
+      "display": "Claude Code",
+      "strengths": ["contract", "review", "harden", "security", "deep_reasoning", "tests"],
+      "cost_tier": "high",
+      "can_write_tests": true,
+      "can_write_impl": true,
+      "sandbox": false,
+      "merge_gating": false
+    },
+    "grok": {
+      "vendor": "grok",
+      "adapter": "lib/grok-call.sh",
+      "display": "Grok CLI",
+      "strengths": ["implement", "variants", "speed", "explore", "web"],
+      "cost_tier": "med",
+      "can_write_tests": false,
+      "can_write_impl": true,
+      "sandbox": false,
+      "merge_gating": false
+    },
+    "codex": {
+      "vendor": "codex",
+      "adapter": "lib/codex-call.sh",
+      "display": "OpenAI Codex",
+      "strengths": ["implement", "review", "sandbox", "linux_isolation"],
+      "cost_tier": "med",
+      "can_write_tests": false,
+      "can_write_impl": true,
+      "sandbox": true,
+      "merge_gating": false
+    },
+    "ollama": {
+      "vendor": "ollama",
+      "adapter": "lib/local-call.sh",
+      "display": "Ollama (local scout)",
+      "strengths": ["scout", "cheap_draft", "zero_quota"],
+      "cost_tier": "zero",
+      "can_write_tests": false,
+      "can_write_impl": true,
+      "sandbox": false,
+      "merge_gating": false,
+      "optional": true
+    },
+    "gate": {
+      "vendor": "deterministic",
+      "adapter": "lib/{import-scan,test-guard,eval-harness,dual-merge}.sh",
+      "display": "Deterministic Gate / Eval",
+      "strengths": ["guards", "eval", "merge", "ownership"],
+      "cost_tier": "zero",
+      "can_write_tests": false,
+      "can_write_impl": false,
+      "sandbox": true,
+      "merge_gating": true
+    }
+  },
+
+  "functions": {
+    "architect": {
+      "purpose": "Write PLAN.md contract, decompose work, AND execute ≥1 package as worker (not pure management)",
+      "phase": "C+W",
+      "default": "claude",
+      "candidates": ["claude"],
+      "required_strengths": ["contract", "tests", "implement"],
+      "may_write": ["PLAN.md", "HANDOFF.md", "tests/**", "src/**"],
+      "also_works": true
+    },
+    "worker": {
+      "purpose": "Execute path-disjoint work packages after PLAN (Claude+Grok+Codex all code)",
+      "phase": "W",
+      "default": "team",
+      "candidates": ["claude", "grok", "codex"],
+      "required_strengths": ["implement"],
+      "team_dispatch": "lib/team-dispatch.sh"
+    },
+    "scout": {
+      "purpose": "Zero-quota first attempt before paid builder",
+      "phase": "R-pre",
+      "default": "ollama",
+      "candidates": ["ollama"],
+      "required_strengths": ["scout"],
+      "optional": true,
+      "never_merge_gating": true
+    },
+    "builder": {
+      "purpose": "Implement POC against PLAN in feat/poc worktree",
+      "phase": "R",
+      "default": "grok",
+      "candidates": ["grok", "codex"],
+      "required_strengths": ["implement"],
+      "must_not_write_tests": true,
+      "may_write": ["src/**", "app/**", "lib/**"]
+    },
+    "assessor": {
+      "purpose": "Review builder diff as untrusted code",
+      "phase": "A",
+      "default": "claude",
+      "candidates": ["claude", "codex"],
+      "required_strengths": ["review"],
+      "must_differ_from": "builder",
+      "comment": "Cross-vendor moat: assessor vendor != builder vendor always"
+    },
+    "rebutter": {
+      "purpose": "One rebuttal round from the builder vendor",
+      "phase": "A2",
+      "default": "builder",
+      "bind_to": "builder",
+      "max_rounds": 1
+    },
+    "hardener": {
+      "purpose": "Tests, error-handling, security pass on feat/harden",
+      "phase": "F",
+      "default": "claude",
+      "candidates": ["claude"],
+      "required_strengths": ["harden", "tests"],
+      "can_write_tests": true
+    },
+    "security": {
+      "purpose": "Threat model + secret/auth sweeps when risk is elevated",
+      "phase": "A+/F",
+      "default": "claude",
+      "candidates": ["claude"],
+      "required_strengths": ["security"],
+      "optional": true
+    },
+    "arbiter": {
+      "purpose": "pass^k + No-Cut merge — never a model opinion",
+      "phase": "T",
+      "default": "gate",
+      "candidates": ["gate"],
+      "required_strengths": ["eval", "merge"],
+      "immutable": true
+    },
+    "guards": {
+      "purpose": "import-scan + test-guard + ownership",
+      "phase": "G",
+      "default": "gate",
+      "candidates": ["gate"],
+      "immutable": true
+    }
+  },
+
+  "profiles": {
+    "minimal": {
+      "label": "cheap / low-risk spike",
+      "scout": false,
+      "fortify": false,
+      "security_pass": false,
+      "adaptive_build": false,
+      "variants": 1,
+      "eval_k": 1,
+      "max_turns": 25,
+      "builder": "grok",
+      "assessor": "claude"
+    },
+    "standard": {
+      "label": "default CRAFT loop",
+      "scout": false,
+      "fortify": false,
+      "security_pass": false,
+      "adaptive_build": true,
+      "variants": 3,
+      "eval_k": 5,
+      "max_turns": 40,
+      "builder": "grok",
+      "assessor": "claude"
+    },
+    "thorough": {
+      "label": "complex feature — scout + fortify + security",
+      "scout": true,
+      "fortify": true,
+      "security_pass": true,
+      "adaptive_build": true,
+      "variants": 3,
+      "eval_k": 5,
+      "max_turns": 50,
+      "builder": "grok",
+      "assessor": "claude"
+    },
+    "security": {
+      "label": "auth/secrets/payments — sandboxed builder + forced fortify",
+      "scout": false,
+      "fortify": true,
+      "security_pass": true,
+      "adaptive_build": true,
+      "variants": 2,
+      "eval_k": 5,
+      "max_turns": 40,
+      "builder": "codex",
+      "assessor": "claude",
+      "prefer_sandbox_builder": true
+    },
+    "sandbox": {
+      "label": "filesystem/shell risk — Codex workspace-write builder",
+      "scout": false,
+      "fortify": true,
+      "security_pass": true,
+      "adaptive_build": false,
+      "variants": 1,
+      "eval_k": 5,
+      "builder": "codex",
+      "assessor": "claude"
+    }
+  },
+
+  "signals": {
+    "risk_high": {
+      "keywords": [
+        "auth", "authenticat", "authoriz", "secret", "password", "credential",
+        "token", "jwt", "oauth", "crypto", "encrypt", "payment", "billing",
+        "ssrf", "xss", "sql inject", "rce", "privilege", "permission",
+        "api key", "private key", "session cookie"
+      ],
+      "boost_profile": "security",
+      "set": { "fortify": true, "security_pass": true }
+    },
+    "complexity_high": {
+      "keywords": [
+        "distributed", "concurrent", "multi-module", "migration", "refactor",
+        "architecture", "pipeline", "orchestrat", "large", "end-to-end",
+        "microservice", "schema change", "backfill"
+      ],
+      "boost_profile": "thorough",
+      "set": { "fortify": true, "scout": true, "adaptive_build": true, "variants_min": 3 }
+    },
+    "needs_sandbox": {
+      "keywords": [
+        "shell out", "subprocess", "filesystem", "rm -rf", "download",
+        "curl ", "wget ", "network call", "untrusted input file", "upload"
+      ],
+      "boost_profile": "sandbox",
+      "set": { "builder": "codex", "fortify": true }
+    },
+    "complexity_low": {
+      "keywords": [
+        "tiny", "trivial", "one-liner", "hello world", "spike", "prototype only",
+        "throwaway", "minimal"
+      ],
+      "boost_profile": "minimal",
+      "only_if_no_risk": true
+    },
+    "ui_frontend": {
+      "keywords": ["react", "css", "frontend", "dashboard", "jsx", "tsx", "vue", "ui "],
+      "set": { "adaptive_build": true, "variants_min": 2 }
+    }
+  },
+
+  "mid_run": {
+    "comment": "Re-route after ledger artifacts exist. Never changes arbiter=gate.",
+    "on_review_clean": {
+      "fortify_if_profile_allows": true,
+      "re_render": false
+    },
+    "on_review_issues": {
+      "high_severity_forces_fortify": true,
+      "conceded_suggests_re_render": true,
+      "subjective_tie_suggests_tiebreak": true
+    },
+    "on_import_scan_block": {
+      "action": "stop",
+      "reason": "invented/off-contract deps — architect must amend PLAN allow-list"
+    },
+    "on_test_guard_block": {
+      "action": "stop",
+      "reason": "builder edited tests — protocol invariant 7"
+    },
+    "cross_vendor_moat": {
+      "enforce": true,
+      "if_same_vendor": "swap_assessor_to_other_candidate"
+    }
+  },
+
+  "invariants": [
+    "assessor vendor != builder vendor",
+    "arbiter is always gate/eval — never a model",
+    "builder never edits tests/verify",
+    "one baton holder; no parallel write phases",
+    "scout never merge-gates",
+    "max 1 rebuttal round"
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "version": 2,
+  "description": "Fine-tuning for Claude↔Grok dual-agent coordination. Enforces sequential baton, one writer per phase, no overlapping work. dual-run.sh loads this file (override with DUAL_COORDINATION_CONFIG). Adaptive who-does-what lives in config/roles.json (lib/role-router.sh) — static roles below are the baseline defaults only.",
+
+  "roles": {
+    "architect": "claude",
+    "builder": "grok",
+    "assessor": "claude",
+    "hardener": "claude",
+    "arbiter": "eval",
+    "comment": "STATIC baseline. Prefer config/roles.json + dual-run --profile auto for adaptive assignment (signals, profiles, cross-vendor moat, mid-run fortify)."
+  },
+  "roles_config": "config/roles.json",
+
+  "branches": {
+    "base": "main",
+    "poc": "feat/poc",
+    "harden": "feat/harden"
+  },
+
+  "phases": ["C", "R", "G", "A", "F", "T"],
+  "phase_names": {
+    "C": "Contract",
+    "R": "Render",
+    "G": "Guards",
+    "A": "Assess",
+    "F": "Fortify",
+    "T": "Test-Merge"
+  },
+  "phase_agent": {
+    "C": "claude",
+    "R": "grok",
+    "G": "gate",
+    "A": "claude",
+    "F": "claude",
+    "T": "gate"
+  },
+  "phase_next": {
+    "C": "R",
+    "R": "G",
+    "G": "A",
+    "A": "F",
+    "F": "T",
+    "T": "done"
+  },
+  "baton_after_phase": {
+    "C": "grok",
+    "R": "gate",
+    "G": "claude",
+    "A": "claude",
+    "F": "gate",
+    "T": "done"
+  },
+
+  "ownership": {
+    "comment": "Who may write what. Builder is intentionally narrow so Claude/Grok never double-edit the same surface. Enforced by test-guard + dual-run ownership check; not a substitute for worktree isolation.",
+    "claude": {
+      "phases": {
+        "C": ["PLAN.md", "HANDOFF.md", ".dual-agent/run-state.json"],
+        "A": ["ledger/REVIEW.json", "ledger/REVIEW.md", "HANDOFF.md", ".dual-agent/run-state.json"],
+        "F": ["**"]
+      },
+      "never": ["ledger/EVAL.json"]
+    },
+    "grok": {
+      "phases": {
+        "R": ["src/**", "lib/**", "app/**", "pkg/**", "cmd/**", "internal/**", "*.py", "*.ts", "*.tsx", "*.js", "*.go", "*.rs", "*.rb", "*.java", "Cargo.toml", "go.mod", "package.json", "pyproject.toml", "requirements.txt", "README.md"]
+      },
+      "never": [
+        "tests/**",
+        "test/**",
+        "verify/**",
+        "**/test_*",
+        "**/*_test.*",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "PLAN.md",
+        "PROTOCOL.md",
+        "HANDOFF.md",
+        "config/**",
+        "ledger/**",
+        "dual-*.sh",
+        "lib/test-guard.sh",
+        "lib/import-scan.sh",
+        "lib/eval-harness.sh",
+        "lib/coordination.sh"
+      ]
+    },
+    "gate": {
+      "phases": {
+        "G": ["ledger/IMPORT-SCAN.json", "ledger/TEST-GUARD.json"],
+        "T": ["ledger/EVAL.json", "HANDOFF.md", ".dual-agent/run-state.json"]
+      }
+    }
+  },
+
+  "anti_overlap": {
+    "exclusive_run_lock": true,
+    "lock_file": ".dual-agent/dual-run.lock",
+    "state_file": ".dual-agent/run-state.json",
+    "require_baton": true,
+    "no_parallel_phases": true,
+    "one_agent_active": true,
+    "builder_cannot_edit_tests": true,
+    "reject_if_another_dual_run": true,
+    "reject_dirty_tree_before_merge": true,
+    "max_rebuttal_rounds": 1,
+    "orchestration_exempt": [
+      "HANDOFF.md",
+      "PLAN.md",
+      ".dual-agent/**",
+      "ledger/**",
+      "config/**"
+    ]
+  },
+
+  "defaults": {
+    "plan": "PLAN.md",
+    "handoff": "HANDOFF.md",
+    "verify": "",
+    "variants": 3,
+    "adaptive": true,
+    "max_turns": 40,
+    "eval_k": 5,
+    "test_guard": true,
+    "import_scan": true,
+    "import_scan_provenance": true,
+    "builder": "grok",
+    "assess_vendor": "claude",
+    "scout": false,
+    "skip_fortify": true,
+    "skip_merge": false,
+    "merge_from_after_render": "feat/poc",
+    "merge_from_after_fortify": "feat/harden",
+    "into": "main"
+  },
+
+  "compounding": {
+    "append_suggestions_to_handoff": true,
+    "feed_suggestions_into_next_plan": true
+  }
+}

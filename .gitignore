@@ -22,3 +22,9 @@ Thumbs.db
 .vscode/
 tests/vendor/
 dashboard.html
+
+# dual-run runtime state (generated per session)
+.dual-agent/role-assignment.json
+.dual-agent/run-state.json
+.dual-agent/dual-run.lock
+.dual-agent/*.lock

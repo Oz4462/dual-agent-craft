@@ -95,6 +95,29 @@ Every saving is **quality-preserving** — proven, not assumed:
 > **Prereqs:** bash 5.x, `git`, `python3`, `curl`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`codex`](https://github.com/openai/codex) as a sandboxed 3rd vendor and [`ollama`](https://ollama.com) for the local scout.
 
 ```bash
+# ── One command (recommended): adaptive Claude↔Grok staffelstab ────────────
+# Fine-tuning: config/coordination.json (lock/ownership) + config/roles.json (who-does-what)
+cp PLAN.template.md PLAN.md   # Claude fills contract — or use --auto-plan --task "…"
+
+# See who will do what for THIS task (adaptive profiles: minimal|standard|thorough|security|sandbox)
+./dual-run.sh --who --task "add OAuth payment flow"
+./lib/role-router.sh profiles
+
+./dual-run.sh --task "…" --verify "python3 -m pytest -q"
+# Phases: C → W(team: Claude+Grok+Codex ALL code) → G → A → [F] → T
+# After PLAN: work packages in ledger/WORK.json — architect also implements, not only plans.
+# Adaptive assess/fortify still applies. --no-team-work restores mono-builder R path.
+# Only one dual-run at a time (exclusive lock). Path-disjoint packages prevent double-writes.
+
+./lib/team-dispatch.sh status          # who got which package
+./lib/team-dispatch.sh run --plan PLAN.md --dry-run
+
+./dual-run.sh --status          # baton / phase / lock + who matrix
+./dual-run.sh --dry-run --task "…" --verify true --skip-merge
+./dual-run.sh --profile security --verify "…"   # force a profile
+./dual-run.sh --no-role-adaptive …              # freeze static baseline
+
+# ── Manual step-by-step (same stages dual-run orchestrates) ────────────────
 # 1. C — write the contract (Claude fills PLAN.template.md)
 cp PLAN.template.md PLAN.md          # ...fill in problem, interface, acceptance, tests...
 
@@ -117,7 +140,7 @@ cp PLAN.template.md PLAN.md          # ...fill in problem, interface, acceptance
 ```
 
 Split-screen cockpit (tmux, watch both agents live): `./dual-view.sh`
-Run the deterministic test suite (143 tests, offline): `tests/run.sh`
+Run the deterministic test suite (offline): `tests/run.sh`
 
 <details>
 <summary><b>Windows (PowerShell 5.1) — original, preserved</b></summary>
@@ -142,6 +165,8 @@ dual-agent-craft/
 ├─ PROTOCOL.md          📜 8 coordination invariants (eval decides, 1 writer/space, …)
 ├─ AGENTS.md            🤝 vendor-neutral builder contract (read by Grok/Codex/Cursor/…)
 ├─ ADAPTERS.md          🔌 how to plug in a 3rd/4th model
+├─ config/coordination.json  🎛️ fine-tuning: roles, ownership, anti-overlap, defaults
+├─ dual-run.sh          🏁 one-command orchestrator (C→R→G→A→F→T, baton + exclusive lock)
 ├─ dual-build.sh        ⚙️  Render: Grok in an isolated worktree, adaptive-N
 ├─ dual-review.sh       💬 Assess: bounded cross-review, eval decides
 ├─ dual-merge.sh        🧪 No-Cut + pass^k merge gate (--test-guard hook)
@@ -150,6 +175,7 @@ dual-agent-craft/
 ├─ dual-view.sh         🖥️  tmux split-screen cockpit
 ├─ lib/
 │  ├─ common.sh         shared helpers (python3-JSON, curl, locale-neutral)
+│  ├─ coordination.sh   baton, exclusive lock, ownership, phase machine
 │  ├─ grok-call.sh      clean headless Grok wrapper (stdout/stderr OS-separated)
 │  ├─ claude-call.sh    clean headless Claude wrapper (+ cost telemetry)
 │  ├─ codex-call.sh     Codex 3rd vendor (real -s sandbox on Linux, -o clean result)

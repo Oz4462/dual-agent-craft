@@ -39,5 +39,26 @@ CLI). The domain comes **only** from the current `PLAN.md`. Nothing here relates
 | `PLAN.md` | the contract — the single shared truth |
 | `PROTOCOL.md` | coordination invariants (1–8) |
 | `HANDOFF.md` | the baton + append-only turn ledger |
+| `config/coordination.json` | fine-tuning: roles, ownership, anti-overlap, phase defaults |
+| `dual-run.sh` | one-command orchestrator (sequential staffelstab; no parallel dual work) |
+| `.dual-agent/run-state.json` | machine baton/phase state for the active dual-run |
 | `ledger/` | per-build artifacts: `REVIEW.json`, `EVAL.json`, `IMPORT-SCAN.json`, `TEST-GUARD.json`, `TIEBREAK.json` |
-| `lib/*.sh` | headless wrappers (`grok-call`, `claude-call`, `codex-call`, `local-call`), `eval-harness` (pass^k), `import-scan`, `test-guard` |
+| `lib/*.sh` | headless wrappers (`grok-call`, `claude-call`, `codex-call`, `local-call`), `eval-harness` (pass^k), `import-scan`, `test-guard`, `coordination` |
+
+## As BUILDER you never start a second parallel dual-run
+If `dual-run.sh --status` shows a live lock or `BATON` is not your builder identity
+(`grok` or `codex` per adaptive assignment), **do not build**. Wait for the staffelstab.
+Overlapping builder+reviewer writes on the same task is a protocol violation.
+
+## Adaptive who-does-what
+You are not always the builder. `config/roles.json` + `lib/role-router.sh` assign functions
+from task/PLAN signals (security → codex builder + Claude assessor + forced fortify;
+complex → thorough with scout; tiny → minimal). Check:
+
+```bash
+./dual-run.sh --who --task "<the task>"
+# or
+./lib/role-router.sh explain --task "<the task>" --plan PLAN.md
+```
+
+If you hold the builder baton: implement only, never tests. If you are not the baton holder: stop.
