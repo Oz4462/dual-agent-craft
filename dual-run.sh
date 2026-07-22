@@ -354,7 +354,9 @@ $(cat "$tmpl")
 EOF
     info "Claude drafting PLAN.md from --task …"
     # claude-call emits adapter-contract JSON on stdout (exit_code/text/json_log).
+    # --no-mcp + --tools "" : pure text, no playwright-mcp hang (login kept).
     ap_json="$("$_HERE/lib/claude-call.sh" --prompt-file "$promptfile" \
+      --no-mcp --tools "" \
       --disallowed-tools "Bash,Write,Edit,WebFetch,WebSearch" \
       --tag dual-run-autoplan \
       ${MODEL:+--model "$MODEL"})" \
