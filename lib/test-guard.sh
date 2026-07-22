@@ -22,6 +22,7 @@ source "$_HERE/common.sh"
 POC="feat/poc"; BASE="main"; DIFF_FILES=""; EXTRA=""; OUTFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --poc)           POC="${2:?value required for $1}"; shift 2;;
     --base)          BASE="${2:?value required for $1}"; shift 2;;
     --diff-files)    DIFF_FILES="${2:?value required for $1}"; shift 2;;

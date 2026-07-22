@@ -20,6 +20,7 @@ source "$_HERE/common.sh"
 VERIFY=""; K=5; CWD="$(pwd)"; THRESHOLD="1.0"; OUTFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --verify)    VERIFY="${2:?value required for $1}"; shift 2;;
     --k)         K="${2:?value required for $1}"; shift 2;;
     --cwd)       CWD="${2:?value required for $1}"; shift 2;;
@@ -38,19 +39,27 @@ passes=0
 early_stopped=false
 runs_executed=0
 runs_json="[]"
+first_fail_log=""
+
+# Per-run output is kept (audit P1: a RED gate used to discard verify output AND
+# delete the worktree -> zero diagnostics). Logs land under the harness log dir.
+evallog_dir="$(repo_root)/.dual-agent/logs"; mkdir -p "$evallog_dir" 2>/dev/null || true
+run_stamp="$(utc_stamp_ms)"
 
 # strict gate == threshold >= 1.0 (float compare via awk).
 strict=$(awk -v t="$THRESHOLD" 'BEGIN{print (t>=1.0)?1:0}')
 
 for (( i=1; i<=K; i++ )); do
-  ( cd "$CWD" && eval "$VERIFY" ) >/dev/null 2>&1
+  runlog="$evallog_dir/eval-$run_stamp-run$i.log"
+  ( cd "$CWD" && eval "$VERIFY" ) >"$runlog" 2>&1
   code=$?
   runs_executed=$((runs_executed+1))
   pass=false
-  if [[ $code -eq 0 ]]; then passes=$((passes+1)); pass=true; fi
-  runs_json=$(python3 - "$runs_json" "$i" "$code" "$pass" <<'PY'
-import sys, json
-runs = json.loads(sys.argv[1]); runs.append({"run": int(sys.argv[2]), "exit": int(sys.argv[3]), "pass": sys.argv[4]=="true"})
+  if [[ $code -eq 0 ]]; then passes=$((passes+1)); pass=true
+  elif [[ -z "$first_fail_log" ]]; then first_fail_log="$runlog"; fi
+  runs_json=$(RUNLOG="$runlog" python3 - "$runs_json" "$i" "$code" "$pass" <<'PY'
+import sys, json, os
+runs = json.loads(sys.argv[1]); runs.append({"run": int(sys.argv[2]), "exit": int(sys.argv[3]), "pass": sys.argv[4]=="true", "log": os.environ["RUNLOG"]})
 print(json.dumps(runs))
 PY
 )
@@ -88,5 +97,9 @@ elif [[ "$pass_at_k" == 1 ]]; then col="$C_YELLOW"
 else col="$C_RED"; fi
 printf '%seval: %s/%s passed  rate=%s  pass@k=%s  pass^k=%s  score_ok=%s%s\n' \
   "$col" "$passes" "$K" "$rate" "$pass_at_k" "$pass_pow_k" "$score_ok" "$C_RESET"
+# On a red gate, point at the first failing run's captured output (diagnostics
+# survive even though the caller may delete the candidate worktree).
+[[ "$pass_pow_k" != 1 && -n "$first_fail_log" ]] && \
+  warn "  first failing run log: $first_fail_log$([[ -s "$first_fail_log" ]] && echo " (tail: $(tail -1 "$first_fail_log" | head -c 120))")"
 
 [[ "$pass_pow_k" == 1 ]] && exit 0 || exit 1

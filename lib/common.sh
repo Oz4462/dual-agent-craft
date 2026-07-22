@@ -45,6 +45,13 @@ fail_code() { _FAIL_CODE="$1"; shift; fail "$@"; }
 # repo_root: the dual-agent harness root (parent of lib/). Works regardless of cwd.
 repo_root() { cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd; }
 
+# usage <script-path>: print the header "# Usage:" block through the arg-parse
+# start, comment markers stripped. `-h|--help` handlers call this and exit 0
+# (audit P2: asking for help used to print a red BLOCKED unknown-arg error).
+usage() {
+  sed -n '/^# Usage:/,/^set -uo/p' "$1" | sed 's/^# \?//; $d'
+}
+
 # utc_stamp: sortable timestamp for log/artifact names.
 utc_stamp() { date -u +"%Y%m%d-%H%M%S"; }
 utc_stamp_ms() { date -u +"%Y%m%d-%H%M%S-%3N"; }

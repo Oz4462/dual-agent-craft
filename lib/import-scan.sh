@@ -28,6 +28,7 @@ POC="feat/poc"; BASE="main"; DIFF_TEXT=""; ALLOW=""; ECO="auto"; PLAN=""
 CHECK_PROV=false; SUSPECT_AGE=30; BLOCK_SUSPECT=false; OUTFILE=""; TIMEOUT=12
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --poc)            POC="${2:?value required for $1}"; shift 2;;
     --base)           BASE="${2:?value required for $1}"; shift 2;;
     --diff-text)      DIFF_TEXT="${2:?value required for $1}"; shift 2;;

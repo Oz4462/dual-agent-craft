@@ -235,3 +235,44 @@ PY
   guard '{"tool_name":"Bash","tool_input":{"command":"cp src/a.py src/b.py"}}'
   [ "$status" -eq 0 ]
 }
+
+# --- Batch D: diagnostics + DX ----------------------------------------------
+
+@test "backlog-D: --help exits 0 with Usage (no red BLOCKED) on entry scripts" {
+  for s in dual-build.sh dual-merge.sh dual-review.sh dual-tiebreak.sh lib/import-scan.sh; do
+    run "$HARNESS_ROOT/$s" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *Usage* ]]
+  done
+}
+
+@test "backlog-D: dual-status runs, exit 0, shows doctor + hygiene sections" {
+  run "$HARNESS_ROOT/dual-status.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[doctor]"* ]]
+  [[ "$output" == *"[hygiene]"* ]]
+}
+
+@test "backlog-D: eval-harness keeps a per-run log and points at the failing one" {
+  run "$HARNESS_ROOT/lib/eval-harness.sh" --verify "echo boom; false" --k 2 --out "$SCRATCH/e.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"first failing run log"* ]]
+  # the log path is recorded in EVAL.json runs[0].log and the file exists
+  logp="$(python3 -c 'import json;print(json.load(open("'"$SCRATCH"'/e.json"))["runs"][0]["log"])')"
+  [ -f "$logp" ]
+  grep -q boom "$logp"
+}
+
+@test "backlog-D: dual-review blocks an oversized diff (partial-review guard)" {
+  REPO="$SCRATCH/repo"; make_repo "$REPO"
+  echo plan > "$REPO/PLAN.md"; git -C "$REPO" add -A; git -C "$REPO" commit -qm plan
+  git -C "$REPO" checkout -qb feat/poc
+  python3 -c "open('$REPO/big.txt','w').write('x\n'*20000)"
+  git -C "$REPO" add -A; git -C "$REPO" commit -qm big
+  git -C "$REPO" checkout -q main
+  cd "$REPO"
+  DUAL_REVIEW_MAX_DIFF_BYTES=1000 run "$HARNESS_ROOT/dual-review.sh" --plan PLAN.md --poc feat/poc --base main
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"too large"* ]]
+  cd - >/dev/null
+}

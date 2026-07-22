@@ -20,6 +20,7 @@ PLAN="./PLAN.md"; VARIANTS=3; BRANCH="feat/poc"; INTO="main"; MODEL=""
 MAX_TURNS=40; ADAPTIVE=false; VERIFY=""; DRYRUN=false; BUILDER="grok"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --plan)      PLAN="${2:?value required for $1}"; shift 2;;
     --variants)  VARIANTS="${2:?value required for $1}"; shift 2;;
     --branch)    BRANCH="${2:?value required for $1}"; shift 2;;

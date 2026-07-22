@@ -17,6 +17,7 @@ source "$_HERE/common.sh"
 CAP=100; SAFETY=0.9; ESTIMATE=0; SPEND_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --cap)        CAP="${2:?value required for $1}"; shift 2;;
     --safety)     SAFETY="${2:?value required for $1}"; shift 2;;
     --estimate)   ESTIMATE="${2:?value required for $1}"; shift 2;;

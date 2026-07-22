@@ -22,6 +22,7 @@ source "$_HERE/lib/common.sh"
 PLAN="./PLAN.md"; POC="feat/poc"; BASE="main"; MODEL=""; DRYRUN=false; ASSESS_VENDOR="claude"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --plan)          PLAN="${2:?value required for $1}"; shift 2;;
     --poc)           POC="${2:?value required for $1}"; shift 2;;
     --base)          BASE="${2:?value required for $1}"; shift 2;;
@@ -40,6 +41,12 @@ git rev-parse --verify "$BASE" >/dev/null 2>&1 || fail "Base branch missing: $BA
 plan_text="$(tr -d '\r' <"$PLAN")"
 diff="$(git diff "$BASE...$POC")"
 [[ -n "${diff// }" ]] || fail "Empty diff ($BASE...$POC) — nothing to review (empty branch?)."
+# Deterministic size cap (audit P2): an unbounded diff yields a silently PARTIAL
+# review (model truncation). Fail loudly instead; strip vendored/generated dirs
+# or split the POC. Override with DUAL_REVIEW_MAX_DIFF_BYTES.
+diff_bytes=${#diff}
+[[ $diff_bytes -le ${DUAL_REVIEW_MAX_DIFF_BYTES:-400000} ]] || \
+  fail "diff is $diff_bytes bytes — too large for a trustworthy single-pass review (cap ${DUAL_REVIEW_MAX_DIFF_BYTES:-400000}). Strip vendored/generated files or split the POC."
 
 tmpdir="$_HERE/.dual-agent/tmp"; ledger="$_HERE/ledger"; mkdir -p "$tmpdir" "$ledger"
 stamp="$(utc_stamp)"

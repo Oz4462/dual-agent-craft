@@ -24,6 +24,7 @@ PLAN="./PLAN.md"; BASE="main"; VERIFY=""; A_DESC=""; B_DESC=""
 ISSUE_ID="tie"; EVAL_K=5; MAX_TURNS=40; MODEL=""; DRYRUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --plan)       PLAN="${2:?value required for $1}"; shift 2;;
     --base)       BASE="${2:?value required for $1}"; shift 2;;
     --verify)     VERIFY="${2:?value required for $1}"; shift 2;;

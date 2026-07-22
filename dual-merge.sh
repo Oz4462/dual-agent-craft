@@ -21,6 +21,7 @@ source "$_HERE/lib/common.sh"
 FROM="feat/harden"; INTO="main"; VERIFY=""; EVAL_K=1; FORCE=false; TESTGUARD=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help)   usage "$0"; exit 0;;
     --from)       FROM="${2:?value required for $1}"; shift 2;;
     --into)       INTO="${2:?value required for $1}"; shift 2;;
     --verify)     VERIFY="${2:?value required for $1}"; shift 2;;
