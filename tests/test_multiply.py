@@ -1,10 +1,10 @@
-"""WP07 — pin PLAN.md acceptance criteria as real tests.
+"""WP07/WP08 — pin PLAN.md acceptance criteria as real tests.
 
 Contract (PLAN.md §3-§5):
 - multiply(a: int | float, b: int | float) -> int | float
 - happy path: multiply(2, 3) == 6
 - null cases: multiply(0, 5) == 0, multiply(7, 0) == 0, multiply(0, 0) == 0
-- negative numbers: multiply(-2, 3) == -6
+- negative numbers: multiply(-2, 3) == -6, multiply(-2, -3) == 6
 
 Pure stdlib (unittest), no third-party deps, no I/O beyond imports. The
 contract is checked against the root-level multiply.py (once integrated)
@@ -83,6 +83,11 @@ class MultiplyContractTest(unittest.TestCase):
         for name, multiply in self.implementations:
             with self.subTest(implementation=name):
                 self.assertEqual(multiply(-2, 3), -6)
+
+    def test_negative_times_negative_is_positive(self):
+        for name, multiply in self.implementations:
+            with self.subTest(implementation=name):
+                self.assertEqual(multiply(-2, -3), 6)
 
 
 if __name__ == "__main__":
