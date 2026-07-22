@@ -1,6 +1,8 @@
-"""WP04 — error_handling: exports ``multiply`` (same pattern as sibling packages).
+"""WP04 — core_impl for PLAN acceptance A4 (no forbidden I/O patterns).
 
-Implementation lives in ``multiply.py`` (stdlib only, no side effects).
+Exports ``multiply`` for package discovery (same pattern as sibling packages).
+Implementation lives in ``multiply.py`` (stdlib only, no side effects,
+no network/process/environment APIs).
 """
 
 from .multiply import multiply
