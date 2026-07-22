@@ -93,9 +93,11 @@ EOF
 
 # --- Ollama scout rung (#3) -------------------------------------------------
 
-# start a fake ollama that returns a fixed {path:content} JSON map; echoes port.
+# start a fake ollama that returns a fixed {path:content} JSON map; writes port file.
+# Portable: wait for the port file (macOS CI is slower than a fixed sleep).
 start_fake_ollama() {
-  local mapjson="$1"
+  local mapjson="$1" i
+  rm -f "$SCRATCH/oport"
   MAP="$mapjson" python3 - "$SCRATCH/oport" <<'PY' &
 import http.server, json, sys, os
 class H(http.server.BaseHTTPRequestHandler):
@@ -105,10 +107,23 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers(); self.wfile.write(body)
     def log_message(self,*a): pass
 srv=http.server.HTTPServer(("127.0.0.1",0),H)
-open(sys.argv[1],"w").write(str(srv.server_address[1])); srv.serve_forever()
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    f.write(str(srv.server_address[1]))
+    f.flush()
+    os.fsync(f.fileno())
+srv.serve_forever()
 PY
   FAKE_OLLAMA_PID=$!
-  sleep 0.6
+  for i in $(seq 1 50); do
+    [[ -s "$SCRATCH/oport" ]] && break
+    # give the background python a moment (and bail if it already died)
+    if ! kill -0 "$FAKE_OLLAMA_PID" 2>/dev/null; then
+      echo "start_fake_ollama: server process died before writing port" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  [[ -s "$SCRATCH/oport" ]] || { echo "start_fake_ollama: port file not ready" >&2; return 1; }
   export DUAL_AGENT_OLLAMA_ENDPOINT="http://127.0.0.1:$(cat "$SCRATCH/oport")/api/chat"
 }
 stop_fake_ollama() { [[ -n "${FAKE_OLLAMA_PID:-}" ]] && kill "$FAKE_OLLAMA_PID" 2>/dev/null || true; }
