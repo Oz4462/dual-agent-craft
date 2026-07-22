@@ -90,9 +90,32 @@ Every saving is **quality-preserving** — proven, not assumed:
 
 ---
 
+## 🖥️ Platforms (Linux · macOS · Windows)
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Full team (`dual-run`, team-dispatch) | ✅ | ✅ Homebrew **bash 5** | ✅ Git Bash or WSL |
+| Classic CRAFT scripts | ✅ bash | ✅ bash 5 | ✅ bash **or** `powershell/*.ps1` |
+| Cockpit | tmux | tmux (brew) | Windows Terminal (`powershell/dual-view.ps1`) |
+
+Details, install notes, and limitations: **[`PLATFORM.md`](./PLATFORM.md)**.
+
+```bash
+# Linux (native)
+./dual-run.sh --status
+
+# macOS (do NOT use system /bin/bash 3.2)
+brew install bash git python3
+/opt/homebrew/bin/bash ./dual-run.sh --status
+
+# Windows PowerShell → Git Bash / WSL bridge
+.\powershell\dual-run.ps1 --status
+.\powershell\dual-status.ps1
+```
+
 ## 🚀 Quickstart (Linux / macOS — bash)
 
-> **Prereqs:** bash 5.x, `git`, `python3`, `curl`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`codex`](https://github.com/openai/codex) as a sandboxed 3rd vendor and [`ollama`](https://ollama.com) for the local scout.
+> **Prereqs:** bash **4.4+** (5.x preferred; macOS: `brew install bash`), `git`, `python3`, `curl`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`codex`](https://github.com/openai/codex) as a sandboxed 3rd vendor and [`ollama`](https://ollama.com) for the local scout.
 
 ```bash
 # ── One command (recommended): adaptive Claude↔Grok staffelstab ────────────
@@ -143,16 +166,27 @@ Split-screen cockpit (tmux, watch both agents live): `./dual-view.sh`
 Run the deterministic test suite (offline): `tests/run.sh`
 
 <details>
-<summary><b>Windows (PowerShell 5.1) — original, preserved</b></summary>
+<summary><b>Windows — full team path (recommended) + classic PS CRAFT</b></summary>
 
-The live-verified Windows variant lives unchanged in <code>powershell/</code>:
+**Recommended (full team-work / dual-run):** Git Bash or WSL, or the PowerShell bridge:
+
+```powershell
+.\powershell\dual-run.ps1 --dry-run --verify "true" --skip-merge
+.\powershell\dual-run.ps1 --task "feature" --verify "py -3 -m pytest -q"
+.\powershell\dual-status.ps1
+```
+
+**Classic CRAFT (PowerShell 5.1, preserved):**
 
 ```powershell
 .\powershell\dual-build.ps1 -Adaptive -Variants 3 -Verify "py -3 test_yourfeature.py"
 .\powershell\lib\import-scan.ps1 -PocBranch feat/poc -Base main -CheckProvenance
 .\powershell\dual-review.ps1 -PocBranch feat/poc -Base main
 .\powershell\dual-merge.ps1 -From feat/poc -Into main -Verify "py -3 test_yourfeature.py" -EvalK 5
+.\powershell\dual-view.ps1
 ```
+
+See <code>PLATFORM.md</code> for the full matrix.
 </details>
 
 ---
@@ -233,7 +267,7 @@ This isn't vibes — every core decision is anchored to a source:
 
 - `--sandbox` for Grok is **macOS-only** today; compensated by worktree isolation + `--deny` + least-privilege. On Linux, **Codex's `-s read-only|workspace-write` is a real local sandbox** — use `lib/codex-call.sh` where sandboxing matters.
 - The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
-- The bash harness is tested on **Linux (bash 5.x)**; macOS should work but is unverified. The original **Windows / PowerShell 5.1** variant is preserved in `powershell/` (live-verified 2026-06).
+- **Cross-platform:** Linux is primary; macOS needs Homebrew bash 5 (portable `date`/`sed`/`stat` in `lib/common.sh`); Windows full team path via **Git Bash or WSL** (`powershell/dual-run.ps1` bridge). Classic CRAFT remains in `powershell/*.ps1`. CI runs on **ubuntu + macos**.
 - The deterministic suite (143 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
 - `ledger/SPEND.jsonl` (budget telemetry) is a plain, unsigned file — the budget guard is a *cost-control convenience*, not a security boundary. By default it lives in-repo, where code running during `--verify` could locate it via `git rev-parse --git-common-dir` and tamper with it; set `DUAL_AGENT_SPEND_FILE=~/.local/state/dual-agent/SPEND.jsonl` (honoured by both writer and guard) to move it outside any git tree.
 

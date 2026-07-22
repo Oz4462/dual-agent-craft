@@ -35,7 +35,18 @@ while true; do
     fi
     # Audit fix: a failing stat (file rotated/removed mid-read) must not freeze
     # the pane silently — warn once and re-scan for the next log.
-    if ! size=$(stat -c%s "$cur" 2>/dev/null); then
+    # Portable size: GNU stat -c%s (Linux), BSD stat -f%z (macOS), wc fallback.
+    size=""
+    if size=$(stat -c%s "$cur" 2>/dev/null); then
+      :
+    elif size=$(stat -f%z "$cur" 2>/dev/null); then
+      :
+    elif size=$(wc -c <"$cur" 2>/dev/null | tr -d '[:space:]'); then
+      :
+    else
+      size=""
+    fi
+    if [[ -z "$size" ]]; then
       printf '\n[watch-grok] log vanished (%s) — waiting for the next build ...\n' "$(basename "$cur")" >&2
       baseline["$cur"]=1; cur=""; pos=0
       continue

@@ -24,6 +24,26 @@ _DUAL_COMMON_SOURCED=1
 # and safe for CI.)
 export LC_ALL=C
 
+# --- Platform / bash version -----------------------------------------------
+# Linux: bash 5.x (distro default). macOS: system /bin/bash is 3.2 — use
+# Homebrew bash (`brew install bash`). Windows: Git Bash or WSL (see PLATFORM.md).
+# Bash 4+ is required for mapfile/associative arrays used by the harness.
+if [[ -z "${DUAL_SKIP_BASH_CHECK:-}" ]] && (( BASH_VERSINFO[0] < 4 )); then
+  printf 'BLOCKED: bash 4+ required (found %s). macOS: brew install bash && re-run with that bash.\n' \
+    "${BASH_VERSION:-unknown}" >&2
+  return 2 2>/dev/null || exit 2
+fi
+
+# dual_os: linux | darwin | windows | unknown  (uname-based; Git Bash reports MINGW*)
+dual_os() {
+  case "$(uname -s 2>/dev/null)" in
+    Linux*)  echo linux ;;
+    Darwin*) echo darwin ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT) echo windows ;;
+    *) echo unknown ;;
+  esac
+}
+
 # --- Colours (respect NO_COLOR and non-tty) --------------------------------
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
@@ -52,10 +72,54 @@ usage() {
   sed -n '/^# Usage:/,/^set -uo/p' "$1" | sed 's/^# \?//; $d'
 }
 
-# utc_stamp: sortable timestamp for log/artifact names.
-utc_stamp() { date -u +"%Y%m%d-%H%M%S"; }
-utc_stamp_ms() { date -u +"%Y%m%d-%H%M%S-%3N"; }
-iso_now() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+# --- Portable time / file helpers (GNU Linux vs BSD macOS vs Git Bash) -----
+# Prefer python3 for ms stamps — %3N is GNU-date only and breaks on macOS.
+utc_stamp() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'from datetime import datetime,timezone; print(datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))'
+  else
+    date -u +"%Y%m%d-%H%M%S"
+  fi
+}
+utc_stamp_ms() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'from datetime import datetime,timezone; d=datetime.now(timezone.utc); print(d.strftime("%Y%m%d-%H%M%S-")+f"{d.microsecond//1000:03d}")'
+  else
+    # last resort: whole seconds + 000
+    printf '%s-000\n' "$(date -u +"%Y%m%d-%H%M%S")"
+  fi
+}
+iso_now() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'from datetime import datetime,timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))'
+  else
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+  fi
+}
+
+# sed_i <expr> <file>  — in-place edit, GNU (Linux) and BSD (macOS) compatible.
+sed_i() {
+  local expr="$1" file="$2"
+  [[ -f "$file" ]] || { warn "sed_i: missing file $file"; return 1; }
+  if sed --version >/dev/null 2>&1; then
+    sed -i "$expr" "$file"
+  else
+    # BSD sed requires a (possibly empty) backup-suffix argument
+    sed -i '' "$expr" "$file"
+  fi
+}
+
+# file_size_bytes <path> — GNU stat -c%s vs BSD stat -f%z vs wc fallback.
+file_size_bytes() {
+  local f="$1"
+  if stat -c%s "$f" >/dev/null 2>&1; then
+    stat -c%s "$f"
+  elif stat -f%z "$f" >/dev/null 2>&1; then
+    stat -f%z "$f"
+  else
+    wc -c <"$f" | tr -d '[:space:]'
+  fi
+}
 
 # --- JSON (python3, no jq) -------------------------------------------------
 # json_extract_text <file>: probe the common vendor result keys in order and

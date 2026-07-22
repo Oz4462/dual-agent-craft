@@ -29,9 +29,22 @@ run_suite() { tests/run.sh >/dev/null 2>&1; }
 # mutate <file> <sed-expr> <description>
 mutate() {
   local file="$1" expr="$2" desc="$3" before after
-  before=$(md5sum "$file")
-  sed -i "$expr" "$file"
-  after=$(md5sum "$file")
+  # Portable checksum (Linux md5sum / macOS md5) + portable in-place sed.
+  if command -v md5sum >/dev/null 2>&1; then
+    before=$(md5sum "$file")
+  else
+    before=$(md5 -q "$file" 2>/dev/null || md5 "$file")
+  fi
+  if sed --version >/dev/null 2>&1; then
+    sed -i "$expr" "$file"
+  else
+    sed -i '' "$expr" "$file"
+  fi
+  if command -v md5sum >/dev/null 2>&1; then
+    after=$(md5sum "$file")
+  else
+    after=$(md5 -q "$file" 2>/dev/null || md5 "$file")
+  fi
   if [[ "$before" == "$after" ]]; then
     # A no-op sed means the module changed out from under the mutation -> this
     # mutation no longer tests anything. That is a COVERAGE REGRESSION, not a
