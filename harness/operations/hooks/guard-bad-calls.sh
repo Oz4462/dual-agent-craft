@@ -79,4 +79,14 @@ if [[ "$tool" == "Write" || "$tool" == "Edit" ]]; then
   [[ "$cmd" =~ $re_secret_files ]] && block "writing secret-material files" "$cmd"
 fi
 
+# Read the nightly SUITE-RED flag (audit P2: it was write-only — nothing surfaced
+# it). Warn ONCE per session (marker) so a red nightly is seen, without spamming.
+proj="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+redflag="$proj/.dual-agent/SUITE-RED.flag"
+marker="$proj/.dual-agent/.suite-red-warned"
+if [[ -f "$redflag" && ! -f "$marker" ]]; then
+  echo "guard: heads-up — the nightly suite is RED ($(head -c 160 "$redflag")). Fix before trusting the gates." >&2
+  touch "$marker" 2>/dev/null || true
+fi
+
 exit 0

@@ -11,4 +11,5 @@ if [[ $fails -gt 0 ]]; then
   printf '{"stamp":"%s","suite":"RED","fails":%s}\n' "$(date -u +%Y%m%d-%H%M%S)" "$fails" | tee "$flag"
   exit 1
 fi
-rm -f "$flag"; echo "nightly: green"
+rm -f "$flag" .dual-agent/.suite-red-warned   # clear the once-per-session warn marker too
+echo "nightly: green"

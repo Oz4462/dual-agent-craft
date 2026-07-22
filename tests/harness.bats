@@ -276,3 +276,31 @@ PY
   [[ "$output" == *"too large"* ]]
   cd - >/dev/null
 }
+
+# --- Batch F: doctrine + automation -----------------------------------------
+
+@test "backlog-F(#20): guard surfaces a SUITE-RED flag once, then stays quiet" {
+  export CLAUDE_PROJECT_DIR="$SCRATCH/proj"
+  mkdir -p "$CLAUDE_PROJECT_DIR/.dual-agent"
+  echo '{"suite":"RED","fails":1}' > "$CLAUDE_PROJECT_DIR/.dual-agent/SUITE-RED.flag"
+  run env HARNESS_GUARD_INPUT='{"tool_name":"Bash","tool_input":{"command":"git status"}}' "$GUARD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nightly suite is RED"* ]]
+  # second call: warned marker set -> quiet
+  run env HARNESS_GUARD_INPUT='{"tool_name":"Bash","tool_input":{"command":"ls"}}' "$GUARD"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"nightly suite is RED"* ]]
+}
+
+@test "backlog-F(#20): a dangerous call is still blocked even with a red flag present" {
+  export CLAUDE_PROJECT_DIR="$SCRATCH/proj"
+  mkdir -p "$CLAUDE_PROJECT_DIR/.dual-agent"
+  echo '{"suite":"RED"}' > "$CLAUDE_PROJECT_DIR/.dual-agent/SUITE-RED.flag"
+  run env HARNESS_GUARD_INPUT='{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' "$GUARD"
+  [ "$status" -eq 2 ]
+}
+
+@test "backlog-F(#19): CONTRACT documents the guard<->mutation<->drill pairing rule" {
+  grep -q "paired mutation in" "$HARNESS_ROOT/harness/CONTRACT.md"
+  grep -q 'single fitness gate' "$HARNESS_ROOT/harness/CONTRACT.md"
+}

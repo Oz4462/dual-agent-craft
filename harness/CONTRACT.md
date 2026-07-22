@@ -60,6 +60,15 @@
 - Cross-vendor moat: reviewer and builder MUST be different vendors; the
   decorrelation log warns when they stop disagreeing.
 
+## Training (pairing rule)
+
+- Every new fail-closed guard or gate ships with **(a)** a regression test,
+  **(b)** a paired mutation in `harness/bin/mutation-train.sh` proving the suite
+  catches its removal, and **(c)** — if it is a reflex — a stimulus in
+  `harness/bin/reflex-drill.sh`. A guard with no mutation is an untrained muscle.
+- `harness/bin/self-check.sh` is the single fitness gate (syntax + configs + suite
+  + reflex-drill + mutation-train). Run it before declaring the harness improved.
+
 ## Escalation
 
 - Security-sensitive change (auth, secrets, deps, hooks, permissions) → run the
