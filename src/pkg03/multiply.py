@@ -7,7 +7,7 @@ conversion, no duck-typing, no I/O, no third-party imports.
 """
 
 
-def multiply(a, b):
+def multiply(a: int | float, b: int | float) -> int | float:
     """Return the arithmetic product a * b.
 
     Accepts int or float only; bool is rejected even though it subclasses
