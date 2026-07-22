@@ -19,17 +19,19 @@ _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$_HERE/lib/common.sh"
 
-PLAN="./PLAN.md"; POC="feat/poc"; BASE="main"; MODEL=""; DRYRUN=false
+PLAN="./PLAN.md"; POC="feat/poc"; BASE="main"; MODEL=""; DRYRUN=false; ASSESS_VENDOR="claude"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)   PLAN="${2:?value required for $1}"; shift 2;;
-    --poc)    POC="${2:?value required for $1}"; shift 2;;
-    --base)   BASE="${2:?value required for $1}"; shift 2;;
-    --model)  MODEL="${2:?value required for $1}"; shift 2;;
-    --dry-run) DRYRUN=true; shift;;
+    --plan)          PLAN="${2:?value required for $1}"; shift 2;;
+    --poc)           POC="${2:?value required for $1}"; shift 2;;
+    --base)          BASE="${2:?value required for $1}"; shift 2;;
+    --model)         MODEL="${2:?value required for $1}"; shift 2;;
+    --assess-vendor) ASSESS_VENDOR="${2:?value required for $1}"; shift 2;;  # claude|codex (cross-vendor reviewer)
+    --dry-run)       DRYRUN=true; shift;;
     *) fail "dual-review: unknown arg '$1'";;
   esac
 done
+[[ "$ASSESS_VENDOR" =~ ^(claude|codex)$ ]] || fail "dual-review: --assess-vendor must be claude or codex, got '$ASSESS_VENDOR'."
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Not a git repo."
 [[ -f "$PLAN" ]] || fail "Contract missing: $PLAN."
@@ -67,14 +69,29 @@ log "Mechanik : 1 Assess (Claude) + 1 Rebuttal (Grok), then the eval decides. No
 
 if [[ "$DRYRUN" == true ]]; then warn "DryRun — no CLI calls."; exit 0; fi
 
-# --- Phase 2: ASSESS (Claude headless) -------------------------------------
+# Opt-in budget pre-flight (audit P1/P2: budget-guard was advertised but never
+# invoked). If DUAL_AGENT_BUDGET_CAP is set, block BEFORE spending — never mid-run.
+if [[ -n "${DUAL_AGENT_BUDGET_CAP:-}" ]]; then
+  "$_HERE/lib/budget-guard.sh" --cap "$DUAL_AGENT_BUDGET_CAP" --estimate "${DUAL_AGENT_EST_PER_REVIEW:-1}" \
+    || fail "budget-guard BLOCKED — review not started (no silent mid-run stop)."
+fi
+
+# --- Phase 2: ASSESS (headless, cross-vendor) ------------------------------
 # Least-privilege: ASSESS only emits a JSON verdict — it never needs tools
 # (audit finding: untrusted diff in-prompt + tool access = injection surface).
-info "\n[A] Claude reviews (untrusted) ..."
-ar="$("$_HERE/lib/claude-call.sh" --prompt-file "$assessfile" \
-        --disallowed-tools "Bash,Write,Edit,WebFetch,WebSearch" --tag review-assess)"
+# --assess-vendor picks the reviewer vendor (P2: the Codex 2nd-reviewer role was
+# documented but unreachable). Codex runs in its real read-only sandbox.
+if [[ "$ASSESS_VENDOR" == codex ]]; then
+  info "\n[A] Codex reviews (untrusted, read-only sandbox) ..."
+  ar="$("$_HERE/lib/codex-call.sh" --prompt-file "$assessfile" --sandbox read-only \
+          --cwd "$(pwd)" ${MODEL:+--model "$MODEL"} --tag review-assess)"
+else
+  info "\n[A] Claude reviews (untrusted) ..."
+  ar="$("$_HERE/lib/claude-call.sh" --prompt-file "$assessfile" \
+          --disallowed-tools "Bash,Write,Edit,WebFetch,WebSearch" --tag review-assess)"
+fi
 ar_exit="$(printf '%s' "$ar" | json_field_stdin exit_code)"
-[[ "$ar_exit" == 0 ]] || fail "claude-call (Assess) failed."
+[[ "$ar_exit" == 0 ]] || fail "$ASSESS_VENDOR-call (Assess) failed."
 assess_text="$(printf '%s' "$ar" | python3 -c 'import sys,json;print(json.load(sys.stdin)["text"])')"
 
 # Extract the issues JSON out of the (possibly fenced) reply.

@@ -17,7 +17,7 @@ _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_HERE/lib/common.sh"
 
 PLAN="./PLAN.md"; VARIANTS=3; BRANCH="feat/poc"; INTO="main"; MODEL=""
-MAX_TURNS=40; ADAPTIVE=false; VERIFY=""; DRYRUN=false
+MAX_TURNS=40; ADAPTIVE=false; VERIFY=""; DRYRUN=false; BUILDER="grok"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plan)      PLAN="${2:?value required for $1}"; shift 2;;
@@ -26,15 +26,18 @@ while [[ $# -gt 0 ]]; do
     --into)      INTO="${2:?value required for $1}"; shift 2;;
     --model)     MODEL="${2:?value required for $1}"; shift 2;;
     --max-turns) MAX_TURNS="${2:?value required for $1}"; shift 2;;
+    --builder)   BUILDER="${2:?value required for $1}"; shift 2;;  # grok|codex (codex = real sandbox, no best-of-n)
     --adaptive)  ADAPTIVE=true; shift;;
     --verify)    VERIFY="${2:?value required for $1}"; shift 2;;
     --dry-run)   DRYRUN=true; shift;;
     *) fail "dual-build: unknown arg '$1'";;
   esac
 done
+[[ "$BUILDER" =~ ^(grok|codex)$ ]] || fail "dual-build: --builder must be grok or codex, got '$BUILDER'."
+command -v "$BUILDER" >/dev/null 2>&1 || fail "$BUILDER CLI not in PATH."
 
 # --- Phase 0: preconditions ------------------------------------------------
-command -v grok >/dev/null 2>&1 || fail "grok CLI not in PATH."
+# (builder CLI presence already checked above, per --builder)
 command -v git  >/dev/null 2>&1 || fail "git not in PATH."
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Not a git repo. Run 'git init' + first commit."
 [[ -f "$PLAN" ]] || fail "Contract missing: $PLAN (Claude must write PLAN.md first)."
@@ -73,6 +76,12 @@ log "Log-Dir  : .dual-agent/logs  (grok-*.out.json + grok-*.err.log separated)"
 
 if [[ "$DRYRUN" == true ]]; then warn "DryRun — no call."; exit 0; fi
 
+# Opt-in budget pre-flight (audit P2): block BEFORE spending if a cap is set.
+if [[ -n "${DUAL_AGENT_BUDGET_CAP:-}" ]]; then
+  "$_HERE/lib/budget-guard.sh" --cap "$DUAL_AGENT_BUDGET_CAP" --estimate "${DUAL_AGENT_EST_PER_BUILD:-2}" \
+    || fail "budget-guard BLOCKED — build not started (no silent mid-run stop)."
+fi
+
 # WIP-base: a worktree branches from a COMMIT, not the working tree. To let Grok
 # see current (uncommitted) work, commit WIP to a feature branch first (no push);
 # $INTO stays clean.
@@ -102,15 +111,24 @@ git worktree add -b "$BRANCH" "$wtpath" HEAD >/dev/null 2>&1 || fail "worktree a
 
 deny=('Bash(rm -rf *)' 'Bash(git push *)' 'Bash(curl *)' 'Bash(wget *)')
 render() {
-  local n="$1"; local -a a=(--prompt-file "$promptfile" --cwd "$wtpath" --max-turns "$MAX_TURNS" --best-of-n "$n" --always-approve --tag grok)
-  [[ -n "$MODEL" ]] && a+=(--model "$MODEL")
-  for d in "${deny[@]}"; do a+=(--deny "$d"); done
-  "$_HERE/lib/grok-call.sh" "${a[@]}"
+  local n="$1"
+  if [[ "$BUILDER" == codex ]]; then
+    # Codex builds in its REAL workspace-write sandbox (no best-of-n; n ignored).
+    local -a a=(--prompt-file "$promptfile" --cwd "$wtpath" --full-auto --sandbox workspace-write --tag codex-build)
+    [[ -n "$MODEL" ]] && a+=(--model "$MODEL")
+    "$_HERE/lib/codex-call.sh" "${a[@]}"
+  else
+    local -a a=(--prompt-file "$promptfile" --cwd "$wtpath" --max-turns "$MAX_TURNS" --best-of-n "$n" --always-approve --tag grok)
+    [[ -n "$MODEL" ]] && a+=(--model "$MODEL")
+    for d in "${deny[@]}"; do a+=(--deny "$d"); done
+    "$_HERE/lib/grok-call.sh" "${a[@]}"
+  fi
 }
 
 # Adaptive: render N=1 first, escalate to full -Variants only on failed acceptance.
+# Codex has no best-of-n -> always effective_n=1.
 effective_n="$VARIANTS"
-[[ "$ADAPTIVE" == true && "$VARIANTS" -gt 1 ]] && effective_n=1
+{ [[ "$ADAPTIVE" == true && "$VARIANTS" -gt 1 ]] || [[ "$BUILDER" == codex ]]; } && effective_n=1
 log "Render   : best-of-$effective_n$([[ "$ADAPTIVE" == true ]] && echo ' (adaptive: N=1 first)')"
 result="$(render "$effective_n")"
 grok_exit="$(printf '%s' "$result" | json_field_stdin exit_code 2>/dev/null || echo 1)"

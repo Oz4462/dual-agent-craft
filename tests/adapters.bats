@@ -105,3 +105,20 @@ STUB
   [[ "$out" != *dangerously* ]]
   [[ "$out" == *"workspace-write"* ]]
 }
+
+@test "backlog-C: dual-review --assess-vendor codex routes ASSESS to codex-call" {
+  grep -q 'ASSESS_VENDOR" == codex' "$HARNESS_ROOT/dual-review.sh"
+  grep -q 'codex-call.sh' "$HARNESS_ROOT/dual-review.sh"
+  grep -q 'sandbox read-only' "$HARNESS_ROOT/dual-review.sh"
+}
+@test "backlog-C: dual-build --builder codex routes render to codex-call, forces n=1" {
+  grep -q 'BUILDER" == codex' "$HARNESS_ROOT/dual-build.sh"
+  grep -q 'codex-call.sh' "$HARNESS_ROOT/dual-build.sh"
+}
+@test "backlog-C: invalid --assess-vendor / --builder is rejected" {
+  S=$(mktemp -d); git init -q -b main "$S/r" >/dev/null; cd "$S/r"; git config user.email t@t; git config user.name t
+  echo x>a; git add -A; git commit -qm b; echo "real plan">PLAN.md; git add -A; git commit -qm p; git checkout -qb feat/poc; echo y>b; git add -A; git commit -qm poc; git checkout -q main
+  run "$HARNESS_ROOT/dual-review.sh" --plan PLAN.md --poc feat/poc --base main --assess-vendor gpt
+  [ "$status" -ne 0 ]; [[ "$output" == *"claude or codex"* ]]
+  cd - >/dev/null; rm -rf "$S"
+}

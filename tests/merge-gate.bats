@@ -121,3 +121,14 @@ EOF
   [ "$status" -ne 0 ]
   [ "$(git -C "$REPO" worktree list | wc -l)" -eq 1 ]
 }
+
+@test "backlog-C: budget-guard pre-flight blocks dual-build when cap exceeded" {
+  # spend ledger over cap -> build must refuse before rendering
+  export DUAL_AGENT_SPEND_FILE="$SCRATCH/SPEND.jsonl"
+  printf '{"stamp":"%s01-000000","cost_usd":99}\n' "$(date -u +%Y%m)" > "$DUAL_AGENT_SPEND_FILE"
+  cd "$REPO"; echo "real plan content" > PLAN.md; git add -A; git commit -qm plan
+  DUAL_AGENT_BUDGET_CAP=5 run "$HARNESS_ROOT/dual-build.sh" --variants 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"budget-guard BLOCKED"* ]] || [[ "$output" == *BLOCKED* ]]
+  cd - >/dev/null
+}
