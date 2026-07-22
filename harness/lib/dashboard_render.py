@@ -1,0 +1,482 @@
+#!/usr/bin/env python3
+"""dashboard_render.py — render the dual-agent harness cockpit to standalone HTML.
+
+Reads a ledger directory + a small state JSON (git/suite/spend, passed on argv[2])
+and prints a self-contained, offline, theme-aware HTML dashboard to stdout.
+No network, no webfonts (monospace = the harness's native voice), no build step.
+
+Usage: dashboard_render.py <ledger_dir> <state_json_file>   > dashboard.html
+"""
+import sys, json, os, html, datetime
+
+
+def load(path):
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def load_jsonl(path):
+    rows = []
+    try:
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return rows
+
+
+def build_model(ledger, state):
+    review = load(os.path.join(ledger, "REVIEW.json"))
+    eval_ = load(os.path.join(ledger, "EVAL.json"))
+    iscan = load(os.path.join(ledger, "IMPORT-SCAN.json"))
+    tguard = load(os.path.join(ledger, "TEST-GUARD.json"))
+    tie = load(os.path.join(ledger, "TIEBREAK.json"))
+    spend = load_jsonl(os.path.join(ledger, "SPEND.jsonl"))
+    decorr = load_jsonl(os.path.join(ledger, "DECORRELATION.jsonl"))
+
+    # month spend
+    month = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m")
+    def ym(s):
+        s = str(s)
+        return s[:6] if s[:6].isdigit() else s[:7].replace("-", "")
+    month_spend = sum(float(e.get("cost_usd") or 0) for e in spend if ym(e.get("stamp", "")) == month)
+    spend_series = [float(e.get("cost_usd") or 0) for e in spend][-40:]
+    decorr_series = [float(e.get("disagreement") or 0) for e in decorr][-40:]
+
+    # CRAFT pipeline lamps: state per stage
+    def verdict_state(v, mapping):
+        return mapping.get(str(v).lower(), "idle")
+    craft = [
+        {"k": "C", "name": "Contract", "state": "ok" if state.get("has_plan") else "idle",
+         "note": "PLAN.md present" if state.get("has_plan") else "no PLAN.md"},
+        {"k": "R", "name": "Render", "state": "ok" if state.get("poc_branch") else "idle",
+         "note": state.get("poc_branch") or "no POC branch"},
+        {"k": "A", "name": "Assess", "state":
+            ("crit" if (review or {}).get("verdict") in ("tie-break-needed", "clarify-unknowns")
+             else "ok" if review else "idle"),
+         "note": (review or {}).get("verdict", "not run")},
+        {"k": "F", "name": "Fortify", "state": "ok" if state.get("harden_branch") else "idle",
+         "note": state.get("harden_branch") or "reviewer hardens"},
+        {"k": "T", "name": "Test gate", "state":
+            ("ok" if (eval_ or {}).get("pass_pow_k") == 1 else "crit" if eval_ else "idle"),
+         "note": (f"pass^k {eval_.get('passes')}/{eval_.get('k')}" if eval_ else "not run")},
+    ]
+
+    guards = []
+    if iscan:
+        v = iscan.get("verdict", "?")
+        guards.append({"name": "import-scan", "verdict": v,
+                       "state": "crit" if v == "BLOCK" else "warn" if v.startswith("WARN") else "ok",
+                       "detail": f"{iscan.get('scanned',0)} scanned · "
+                                 f"invented {len(iscan.get('invented',[]))} · "
+                                 f"off-contract {len(iscan.get('off_contract',[]))} · "
+                                 f"supply {len(iscan.get('supply_chain',[]))}"})
+    if tguard:
+        v = tguard.get("verdict", "?")
+        guards.append({"name": "test-guard", "verdict": v,
+                       "state": "crit" if v == "BLOCK" else "ok",
+                       "detail": (f"{len(tguard.get('violations',[]))} test-file edit(s)"
+                                  if tguard.get("violations") else "no test/verify edits")})
+
+    review_model = None
+    if review:
+        review_model = {
+            "verdict": review.get("verdict", "?"),
+            "conceded": len(review.get("conceded", []) or []),
+            "eval_decides": len(review.get("eval_decides", []) or []),
+            "ties": len(review.get("ties", []) or []),
+            "unsure": len(review.get("unsure", []) or []),
+            "issues": len(review.get("issues", []) or []),
+        }
+
+    eval_model = None
+    if eval_:
+        eval_model = {
+            "passes": eval_.get("passes", 0), "k": eval_.get("k", 0),
+            "pass_pow_k": eval_.get("pass_pow_k", 0), "pass_at_k": eval_.get("pass_at_k", 0),
+            "rate": eval_.get("rate", 0), "early_stopped": eval_.get("early_stopped", False),
+        }
+
+    tie_model = None
+    if tie:
+        tie_model = {
+            "winner": tie.get("winner", "?"), "issue": tie.get("issue_id", "?"),
+            "a": tie.get("A", {}), "b": tie.get("B", {}),
+        }
+
+    return {
+        "state": state,
+        "craft": craft,
+        "guards": guards,
+        "review": review_model,
+        "eval": eval_model,
+        "tie": tie_model,
+        "month": month,
+        "month_spend": round(month_spend, 2),
+        "spend_series": spend_series,
+        "decorr_series": decorr_series,
+        "decorr_last": decorr_series[-1] if decorr_series else None,
+    }
+
+
+TEMPLATE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dual-Agent CRAFT — Cockpit</title>
+<style>
+:root{
+  --mono: ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --sans: system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --ground:#f4f6f9; --surface:#ffffff; --surface-2:#f0f3f7;
+  --ink:#18212f; --muted:#5a6675; --line:#e0e5ec; --line-strong:#c9d2dd;
+  --accent:#2f6fed; --accent-ink:#ffffff;
+  --ok:#1aa251; --warn:#c9820a; --crit:#dc3a3a; --idle:#9aa6b4;
+  --ok-bg:#e7f6ec; --warn-bg:#fbf1dc; --crit-bg:#fbe6e6; --idle-bg:#eef1f5;
+  --claude:#d97757; --grok:#6b7280; --codex:#0d9488; --ollama:#8b5cf6;
+  --shadow:0 1px 2px rgba(20,30,48,.06),0 8px 24px rgba(20,30,48,.06);
+  --r:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ground:#0c1117; --surface:#141b24; --surface-2:#0f161e;
+    --ink:#e7edf5; --muted:#8b98a9; --line:#232d3a; --line-strong:#31404f;
+    --accent:#5b9bff; --accent-ink:#0b1017;
+    --ok:#3ad07f; --warn:#f0b429; --crit:#ff6b6b; --idle:#5c6b7c;
+    --ok-bg:#10241a; --warn-bg:#2a2110; --crit-bg:#2a1414; --idle-bg:#171f28;
+    --claude:#e08a6b; --grok:#9aa3ad; --codex:#22b8a6; --ollama:#a78bfa;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="light"]{
+  --ground:#f4f6f9; --surface:#ffffff; --surface-2:#f0f3f7;
+  --ink:#18212f; --muted:#5a6675; --line:#e0e5ec; --line-strong:#c9d2dd;
+  --accent:#2f6fed; --accent-ink:#ffffff;
+  --ok:#1aa251; --warn:#c9820a; --crit:#dc3a3a; --idle:#9aa6b4;
+  --ok-bg:#e7f6ec; --warn-bg:#fbf1dc; --crit-bg:#fbe6e6; --idle-bg:#eef1f5;
+  --claude:#d97757; --grok:#6b7280; --codex:#0d9488; --ollama:#8b5cf6;
+  --shadow:0 1px 2px rgba(20,30,48,.06),0 8px 24px rgba(20,30,48,.06);
+}
+:root[data-theme="dark"]{
+  --ground:#0c1117; --surface:#141b24; --surface-2:#0f161e;
+  --ink:#e7edf5; --muted:#8b98a9; --line:#232d3a; --line-strong:#31404f;
+  --accent:#5b9bff; --accent-ink:#0b1017;
+  --ok:#3ad07f; --warn:#f0b429; --crit:#ff6b6b; --idle:#5c6b7c;
+  --ok-bg:#10241a; --warn-bg:#2a2110; --crit-bg:#2a1414; --idle-bg:#171f28;
+  --claude:#e08a6b; --grok:#9aa3ad; --codex:#22b8a6; --ollama:#a78bfa;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--ground); color:var(--ink); font-family:var(--sans);
+  font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px; margin:0 auto; padding:0 20px 64px}
+.mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+.eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted)}
+
+/* --- top status bar --- */
+header.bar{
+  position:sticky; top:0; z-index:20; background:color-mix(in srgb,var(--surface) 88%,transparent);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+}
+.bar-in{max-width:1180px; margin:0 auto; padding:12px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+.brand{display:flex; align-items:baseline; gap:10px}
+.brand b{font-family:var(--mono); font-size:15px; letter-spacing:-.01em}
+.brand .v{font-family:var(--mono); font-size:11px; color:var(--muted)}
+.bar-spacer{flex:1 1 auto; min-width:8px}
+.stat{display:flex; flex-direction:column; gap:1px}
+.stat .l{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+.stat .v{font-family:var(--mono); font-size:14px; font-weight:600}
+.toggle{font-family:var(--mono); font-size:12px; border:1px solid var(--line-strong); background:var(--surface);
+  color:var(--ink); border-radius:8px; padding:6px 10px; cursor:pointer}
+.toggle:hover{border-color:var(--accent)}
+.toggle:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+/* --- verdict pill --- */
+.pill{display:inline-flex; align-items:center; gap:7px; font-family:var(--mono); font-size:12px; font-weight:600;
+  padding:5px 11px; border-radius:999px; letter-spacing:.02em; border:1px solid transparent}
+.pill .dot{width:8px; height:8px; border-radius:50%}
+.pill.ok{color:var(--ok); background:var(--ok-bg); border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.pill.warn{color:var(--warn); background:var(--warn-bg); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+.pill.crit{color:var(--crit); background:var(--crit-bg); border-color:color-mix(in srgb,var(--crit) 34%,transparent)}
+.pill.idle{color:var(--muted); background:var(--idle-bg); border-color:var(--line)}
+.pill.ok .dot{background:var(--ok)} .pill.warn .dot{background:var(--warn)}
+.pill.crit .dot{background:var(--crit)} .pill.idle .dot{background:var(--idle)}
+.pill.crit .dot{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.pill.crit .dot{animation:none}}
+
+/* --- hero line --- */
+.hero{padding:34px 0 10px}
+.hero h1{font-family:var(--mono); font-size:clamp(22px,2.2vw,30px); letter-spacing:-.02em; margin:.35em 0 .15em; text-wrap:balance}
+.hero p{color:var(--muted); max-width:60ch; margin:.2em 0 0}
+
+/* --- CRAFT pipeline --- */
+.pipe{display:grid; grid-template-columns:repeat(5,1fr); gap:0; margin:22px 0 30px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); overflow:hidden}
+.stage{position:relative; padding:16px 14px 15px; border-right:1px solid var(--line)}
+.stage:last-child{border-right:0}
+.stage .top{display:flex; align-items:center; gap:9px}
+.lamp{width:11px; height:11px; border-radius:50%; box-shadow:0 0 0 3px color-mix(in srgb,currentColor 16%,transparent)}
+.stage.ok{color:var(--ok)} .stage.crit{color:var(--crit)} .stage.warn{color:var(--warn)} .stage.idle{color:var(--idle)}
+.stage.ok .lamp{background:var(--ok)} .stage.crit .lamp{background:var(--crit)}
+.stage.warn .lamp{background:var(--warn)} .stage.idle .lamp{background:var(--idle)}
+.stage .k{font-family:var(--mono); font-weight:700; font-size:13px; color:var(--ink)}
+.stage .nm{font-family:var(--mono); font-size:12px; color:var(--ink); margin-top:9px; font-weight:600}
+.stage .nt{font-size:11.5px; color:var(--muted); margin-top:2px; font-family:var(--mono);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.stage.crit .lamp{animation:pulse 1.6s ease-in-out infinite}
+
+/* --- bento grid --- */
+.grid{display:grid; grid-template-columns:repeat(12,1fr); gap:16px}
+.card{grid-column:span 6; background:var(--surface); border:1px solid var(--line); border-radius:var(--r);
+  box-shadow:var(--shadow); padding:18px; position:relative; overflow:hidden}
+.card.span4{grid-column:span 4} .card.span8{grid-column:span 8} .card.span12{grid-column:span 12}
+.card .stripe{position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--idle)}
+.card.ok .stripe{background:var(--ok)} .card.warn .stripe{background:var(--warn)} .card.crit .stripe{background:var(--crit)}
+.card h3{font-family:var(--mono); font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);
+  margin:0 0 12px; display:flex; align-items:center; justify-content:space-between; gap:10px}
+.big{font-family:var(--mono); font-size:30px; font-weight:700; letter-spacing:-.02em; line-height:1}
+.sub{color:var(--muted); font-size:12.5px; margin-top:6px; font-family:var(--mono)}
+.row{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
+.kv{display:flex; gap:8px; align-items:baseline; font-family:var(--mono); font-size:13px}
+.kv .n{color:var(--muted)} .kv .val{font-weight:600}
+.bars{display:grid; gap:8px; margin-top:6px}
+.barline{display:grid; grid-template-columns:64px 1fr 44px; gap:10px; align-items:center; font-family:var(--mono); font-size:12px}
+.track{height:8px; border-radius:5px; background:var(--surface-2); overflow:hidden}
+.fill{height:100%; border-radius:5px}
+.chip{display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; padding:3px 8px;
+  border-radius:6px; border:1px solid var(--line); color:var(--muted)}
+.chip .sw{width:8px;height:8px;border-radius:2px}
+canvas{display:block; width:100%; height:56px}
+.gauge-wrap{display:flex; align-items:center; gap:18px}
+.recorder{font-family:var(--mono); font-size:12px; display:grid; gap:6px; max-height:180px; overflow:auto}
+.recorder .re{display:grid; grid-template-columns:118px 54px 1fr; gap:8px; color:var(--muted); align-items:baseline}
+.recorder .re .f{color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+footer{margin-top:34px; color:var(--muted); font-family:var(--mono); font-size:11.5px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+@media(max-width:820px){
+  .pipe{grid-template-columns:1fr 1fr} .stage:nth-child(2n){border-right:0}
+  .card,.card.span4,.card.span8{grid-column:span 12}
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand"><b>dual-agent</b><span class="v">CRAFT cockpit</span></div>
+    <span id="topVerdict" class="pill idle"><span class="dot"></span>—</span>
+    <div class="bar-spacer"></div>
+    <div class="stat"><span class="l">branch</span><span class="v" id="sBranch">—</span></div>
+    <div class="stat"><span class="l">suite</span><span class="v" id="sSuite">—</span></div>
+    <div class="stat"><span class="l">spend · <span id="sMonth"></span></span><span class="v" id="sSpend">—</span></div>
+    <button class="toggle" id="themeBtn" aria-label="Toggle theme">◐ theme</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="hero">
+    <div class="eyebrow">cross-vendor build harness</div>
+    <h1 id="heroTitle">Two rival models. One referee that can't be argued with.</h1>
+    <p id="heroSub">Live state of the CRAFT loop and every deterministic guard, read straight from the ledger.</p>
+  </section>
+
+  <section class="pipe" id="pipe" aria-label="CRAFT pipeline"></section>
+
+  <section class="grid" id="grid"></section>
+
+  <footer>
+    <span id="genStamp">—</span>
+    <span>fail-closed · the eval decides, not consensus</span>
+  </footer>
+</div>
+
+<script>
+const L = window.LEDGER || {};
+const $ = (id)=>document.getElementById(id);
+const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cssv = (n)=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* theme toggle (media query is the default; toggle stamps data-theme) */
+(function(){
+  const root=document.documentElement, KEY='dac-theme';
+  const saved=localStorage.getItem(KEY); if(saved) root.setAttribute('data-theme',saved);
+  $('themeBtn').addEventListener('click',()=>{
+    const cur=root.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    const next=cur==='dark'?'light':'dark';
+    root.setAttribute('data-theme',next); localStorage.setItem(KEY,next);
+    drawAll();
+  });
+})();
+
+/* status bar */
+const st=L.state||{};
+$('sBranch').textContent = st.branch || '—';
+$('sSuite').textContent = st.suite || '—';
+$('sMonth').textContent = L.month || '';
+$('sSpend').textContent = '$'+(L.month_spend!=null?L.month_spend.toFixed(2):'0.00');
+$('genStamp').textContent = 'generated '+(st.stamp||'')+(st.repo?(' · '+st.repo):'');
+(function(){
+  const v = st.suite_verdict || 'idle';
+  const map={FIT:['ok','FIT'],UNFIT:['crit','UNFIT']};
+  const [cls,lab]= map[v] || (st.suite && st.suite.includes('/') && st.suite.split('/')[0]===st.suite.split('/')[1] ? ['ok','GREEN'] : ['idle','—']);
+  const p=$('topVerdict'); p.className='pill '+cls; p.innerHTML='<span class="dot"></span>'+lab;
+})();
+
+/* CRAFT pipeline */
+$('pipe').innerHTML = (L.craft||[]).map(s=>`
+  <div class="stage ${s.state}">
+    <div class="top"><span class="lamp"></span><span class="k">${esc(s.k)}</span></div>
+    <div class="nm">${esc(s.name)}</div>
+    <div class="nt" title="${esc(s.note)}">${esc(s.note)}</div>
+  </div>`).join('');
+
+/* cards */
+const cards=[];
+/* guards */
+(L.guards||[]).forEach(g=>{
+  cards.push(`<div class="card span6 ${g.state}"><span class="stripe"></span>
+    <h3>${esc(g.name)} <span class="pill ${g.state}"><span class="dot"></span>${esc(g.verdict)}</span></h3>
+    <div class="sub">${esc(g.detail)}</div></div>`);
+});
+/* eval gauge */
+if(L.eval){
+  const e=L.eval, pct=e.k?Math.round(100*e.passes/e.k):0, cls=e.pass_pow_k?'ok':'crit';
+  cards.push(`<div class="card span6 ${cls}"><span class="stripe"></span>
+    <h3>test gate · pass^k</h3>
+    <div class="gauge-wrap">
+      <canvas class="gauge" width="120" height="120" data-pct="${pct}" data-cls="${cls}" style="width:96px;height:96px;flex:0 0 auto"></canvas>
+      <div>
+        <div class="big">${e.passes}/${e.k}</div>
+        <div class="sub">rate ${(+e.rate).toFixed(2)} · pass@k ${e.pass_at_k} · pass^k ${e.pass_pow_k}${e.early_stopped?' · early-stop':''}</div>
+      </div>
+    </div></div>`);
+}
+/* review + decorrelation */
+if(L.review){
+  const r=L.review;
+  const seg=[['conceded',r.conceded,'var(--codex)'],['eval',r.eval_decides,'var(--accent)'],
+             ['ties',r.ties,'var(--warn)'],['unsure',r.unsure,'var(--muted)']];
+  const total=Math.max(1,r.issues);
+  cards.push(`<div class="card span6"><span class="stripe"></span>
+    <h3>cross-review <span class="pill ${r.ties?'warn':r.unsure?'warn':'ok'}"><span class="dot"></span>${esc(r.verdict)}</span></h3>
+    <div class="bars">${seg.map(([n,val,c])=>`
+      <div class="barline"><span style="color:var(--muted)">${n}</span>
+        <span class="track"><span class="fill" style="width:${Math.round(100*val/total)}%;background:${c}"></span></span>
+        <span style="text-align:right">${val}</span></div>`).join('')}</div>
+    <div class="sub">${r.issues} issue(s) raised · the eval settles the decidable ones</div></div>`);
+}
+/* decorrelation (moat) */
+if(L.decorr_series && L.decorr_series.length){
+  const last=L.decorr_last, warn=last!=null && last<0.15;
+  cards.push(`<div class="card span6 ${warn?'warn':'ok'}"><span class="stripe"></span>
+    <h3>moat · vendor disagreement</h3>
+    <div class="row"><div class="big">${last!=null?last.toFixed(2):'—'}</div>
+      <span class="sub">${warn?'converging — moat weakening':'healthy independent review'}</span></div>
+    <canvas class="spark" data-series="decorr" data-warn="${warn?1:0}"></canvas></div>`);
+}
+/* spend */
+if(L.spend_series && L.spend_series.length){
+  cards.push(`<div class="card span6"><span class="stripe"></span>
+    <h3>spend · ${esc(L.month)}</h3>
+    <div class="big">$${(L.month_spend||0).toFixed(2)}</div>
+    <div class="sub">${L.spend_series.length} metered call(s) · per-call cost</div>
+    <canvas class="spark" data-series="spend"></canvas></div>`);
+}
+/* tiebreak */
+if(L.tie){
+  const t=L.tie, A=t.a||{}, B=t.b||{};
+  const bar=(o,c)=>{const w=Math.min(100,(o.passes||0)*20+ (o.pass_pow_k?40:0));
+    return `<span class="track"><span class="fill" style="width:${w}%;background:${c}"></span></span>`;};
+  cards.push(`<div class="card span6"><span class="stripe"></span>
+    <h3>tie-break · micro-probe <span class="pill ${t.winner==='none'?'crit':'ok'}"><span class="dot"></span>${esc(t.winner)}</span></h3>
+    <div class="bars">
+      <div class="barline"><span>A</span>${bar(A,'var(--claude)')}<span style="text-align:right">${A.passes||0}/${A.pass_pow_k?'✓':'·'}</span></div>
+      <div class="barline"><span>B</span>${bar(B,'var(--grok)')}<span style="text-align:right">${B.passes||0}/${B.pass_pow_k?'✓':'·'}</span></div>
+    </div>
+    <div class="sub">measured, not argued · winner keeps its branch</div></div>`);
+}
+/* vendor legend */
+cards.push(`<div class="card span12"><h3>vendors · the cross-vendor moat</h3>
+  <div class="row" style="gap:14px">
+    <span class="chip"><span class="sw" style="background:var(--claude)"></span>Claude · reviewer</span>
+    <span class="chip"><span class="sw" style="background:var(--grok)"></span>Grok · builder</span>
+    <span class="chip"><span class="sw" style="background:var(--codex)"></span>Codex · sandboxed 2nd</span>
+    <span class="chip"><span class="sw" style="background:var(--ollama)"></span>Ollama · zero-quota scout</span>
+  </div>
+  <div class="sub">reviewer and builder are always different vendors — uncorrelated errors are the whole point</div></div>`);
+
+$('grid').innerHTML = cards.join('');
+
+/* --- canvas drawing (sparklines + gauge), theme-aware --- */
+function drawSpark(cv){
+  const series = cv.dataset.series==='spend' ? (L.spend_series||[]) : (L.decorr_series||[]);
+  const dpr=devicePixelRatio||1, w=cv.clientWidth||300, h=56;
+  cv.width=w*dpr; cv.height=h*dpr; const g=cv.getContext('2d'); g.scale(dpr,dpr);
+  g.clearRect(0,0,w,h);
+  if(series.length<2){g.fillStyle=cssv('--muted');g.font='12px monospace';g.fillText('not enough data yet',0,20);return;}
+  const min=Math.min(...series), max=Math.max(...series), rng=(max-min)||1, pad=6;
+  const X=i=>pad+i*(w-2*pad)/(series.length-1), Y=v=>h-pad-(v-min)/rng*(h-2*pad);
+  const warn = cv.dataset.warn==='1';
+  const stroke = warn?cssv('--warn'):cssv('--accent');
+  /* faint grid baseline */
+  g.strokeStyle=cssv('--line'); g.lineWidth=1; g.beginPath(); g.moveTo(0,h-pad); g.lineTo(w,h-pad); g.stroke();
+  /* area fill */
+  g.beginPath(); g.moveTo(X(0),Y(series[0]));
+  series.forEach((v,i)=>g.lineTo(X(i),Y(v)));
+  g.lineTo(X(series.length-1),h-pad); g.lineTo(X(0),h-pad); g.closePath();
+  const grad=g.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,stroke+'33'); grad.addColorStop(1,stroke+'00'); g.fillStyle=grad; g.fill();
+  /* line */
+  g.beginPath(); series.forEach((v,i)=>i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));
+  g.strokeStyle=stroke; g.lineWidth=2; g.lineJoin='round'; g.stroke();
+  /* emphasized endpoint */
+  g.beginPath(); g.arc(X(series.length-1),Y(series[series.length-1]),3.2,0,7); g.fillStyle=stroke; g.fill();
+}
+function drawGauge(cv){
+  const pct=+cv.dataset.pct, cls=cv.dataset.cls, dpr=devicePixelRatio||1, s=96;
+  cv.width=s*dpr; cv.height=s*dpr; const g=cv.getContext('2d'); g.scale(dpr,dpr);
+  g.clearRect(0,0,s,s); const cx=s/2,cy=s/2,r=s/2-9, a0=-Math.PI/2;
+  g.lineWidth=9; g.lineCap='round';
+  g.beginPath(); g.arc(cx,cy,r,0,2*Math.PI); g.strokeStyle=cssv('--surface-2'); g.stroke();
+  g.beginPath(); g.arc(cx,cy,r,a0,a0+2*Math.PI*pct/100); g.strokeStyle=cls==='ok'?cssv('--ok'):cssv('--crit'); g.stroke();
+  g.fillStyle=cssv('--ink'); g.textAlign='center'; g.textBaseline='middle';
+  g.font='700 20px '+cssv('--mono').split(',')[0]; g.fillText(pct+'%',cx,cy);
+}
+function drawAll(){
+  document.querySelectorAll('canvas.spark').forEach(drawSpark);
+  document.querySelectorAll('canvas.gauge').forEach(drawGauge);
+}
+addEventListener('resize',drawAll); drawAll();
+</script>
+</body>
+</html>
+"""
+
+
+def render(model):
+    return TEMPLATE.replace("window.LEDGER || {}", "window.LEDGER = " + json.dumps(model) + " || {}", 1)
+
+
+def main():
+    if len(sys.argv) < 3:
+        sys.stderr.write("usage: dashboard_render.py <ledger_dir> <state_json>\n"); sys.exit(1)
+    ledger, state_file = sys.argv[1], sys.argv[2]
+    state = load(state_file) or {}
+    model = build_model(ledger, state)
+    sys.stdout.write(render(model))
+
+
+if __name__ == "__main__":
+    main()
