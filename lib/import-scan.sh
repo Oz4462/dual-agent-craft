@@ -87,7 +87,7 @@ for raw in diff.splitlines():
         # `from X[.sub] import ...` -> top-level package; NOT relative `from .`.
         # Dotted form MUST be captured (audit finding: `from fakepkg.sub import x`
         # previously bypassed the scan entirely because '.' broke the match).
-        m = re.match(r'\s*from\s+([A-Za-z_][A-Za-z0-9_]*)\s+import', line)
+        m = re.match(r'\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import', line)
         if m: pkgs.setdefault(m.group(1).split('.')[0], 'python')
     if eco in ('auto', 'npm'):
         m = re.search(r'''(?:import\s.*\sfrom|require\()\s*['"]([^'"]+)['"]''', line)

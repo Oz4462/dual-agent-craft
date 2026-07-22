@@ -1,4 +1,4 @@
-# Muscle Memory — 35 earned lessons
+# Muscle Memory — 36 earned lessons
 
 > Instant recall before touching code. Each entry is one burned lesson: many were
 > paid for in THIS repo (marked ⚡ = found live here), the rest in prior projects.
@@ -91,3 +91,7 @@
     mutated guard on disk when a timeout killed it mid-run (no trap) — silently
     weakening a live reflex. Any tool that temporarily breaks the tree needs an
     EXIT/INT/TERM trap, and a no-op mutation (SKIP) must FAIL, not read as 'killed'.
+36. ⚡ **Never `git add -A` while a mutation/fault-injection tool runs.** mutation-train
+    temporarily mutates tracked files; a concurrent `git add -A` can COMMIT a
+    mutation (a real Batch-B import-scan fix got reverted this way — caught only by
+    the suite). Commit with EXPLICIT paths during any such window, or wait for it.
