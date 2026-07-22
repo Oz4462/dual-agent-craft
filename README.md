@@ -14,7 +14,7 @@ A local build harness where **Claude Code** (architect/reviewer) and **Grok CLI*
 ![Ollama](https://img.shields.io/badge/Ollama-zero--quota_scout-000000?logo=ollama&logoColor=white)
 ![API keys](https://img.shields.io/badge/API_keys-0-2ea44f)
 ![Merge gate](https://img.shields.io/badge/merge-pass%5Ek_gated-1f6feb)
-![Tests](https://img.shields.io/badge/bats_suite-106%2F106-2ea44f)
+![Tests](https://img.shields.io/badge/bats_suite-143%2F143-2ea44f)
 
 </div>
 
@@ -117,7 +117,7 @@ cp PLAN.template.md PLAN.md          # ...fill in problem, interface, acceptance
 ```
 
 Split-screen cockpit (tmux, watch both agents live): `./dual-view.sh`
-Run the deterministic test suite (106 tests, offline): `tests/run.sh`
+Run the deterministic test suite (143 tests, offline): `tests/run.sh`
 
 <details>
 <summary><b>Windows (PowerShell 5.1) — original, preserved</b></summary>
@@ -146,6 +146,7 @@ dual-agent-craft/
 ├─ dual-review.sh       💬 Assess: bounded cross-review, eval decides
 ├─ dual-merge.sh        🧪 No-Cut + pass^k merge gate (--test-guard hook)
 ├─ dual-tiebreak.sh     🎲 invariant-8 micro-probe: build both, MEASURE the winner
+├─ dual-status.sh       🩺 doctor: CLIs, ledger verdicts, spend, hygiene
 ├─ dual-view.sh         🖥️  tmux split-screen cockpit
 ├─ lib/
 │  ├─ common.sh         shared helpers (python3-JSON, curl, locale-neutral)
@@ -207,7 +208,7 @@ This isn't vibes — every core decision is anchored to a source:
 - `--sandbox` for Grok is **macOS-only** today; compensated by worktree isolation + `--deny` + least-privilege. On Linux, **Codex's `-s read-only|workspace-write` is a real local sandbox** — use `lib/codex-call.sh` where sandboxing matters.
 - The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
 - The bash harness is tested on **Linux (bash 5.x)**; macOS should work but is unverified. The original **Windows / PowerShell 5.1** variant is preserved in `powershell/` (live-verified 2026-06).
-- The deterministic suite (106 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
+- The deterministic suite (143 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
 - `ledger/SPEND.jsonl` (budget telemetry) is a plain, unsigned file — the budget guard is a *cost-control convenience*, not a security boundary. By default it lives in-repo, where code running during `--verify` could locate it via `git rev-parse --git-common-dir` and tamper with it; set `DUAL_AGENT_SPEND_FILE=~/.local/state/dual-agent/SPEND.jsonl` (honoured by both writer and guard) to move it outside any git tree.
 
 ---

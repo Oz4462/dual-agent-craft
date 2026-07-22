@@ -45,3 +45,17 @@
   wiring, Codex-reviewer role in dual-review, import-scan reading PLAN allowlist, dual-build
   test coverage). Handed to owner to greenlight.
 - **STATE**: branch feat/bash-port, 17 commits ahead of main, tree clean, suite 106/106, unpushed.
+
+## 2026-07-22 — Backlog cleared (all 26 verified items from the self-improve workflow)
+- **DONE (verified)**: worked the entire verified backlog in 6 themed batches (A-F) + the Ollama scout, each item verified against real code + regression-tested:
+  - A robustness: worktree paths from git-toplevel, tiebreak keeps the winning branch, EXIT-trap worktree cleanup (no leaks).
+  - B import-scan/test-guard: allow-list trim, --plan reads 'Erlaubte Dependencies', manifest supply-chain block (git+/file:/github:), test-runner-config coverage (pytest.ini/jest.config, excl pyproject/package.json).
+  - C orchestration: budget-guard opt-in pre-flight, --assess-vendor claude|codex (Codex reviewer real), --builder grok|codex (Codex sandboxed builder).
+  - D diagnostics/DX: dual-status.sh doctor, eval-harness keeps run logs + points at first failing log, --help everywhere, dual-review diff-size cap.
+  - E coverage: dual-build.bats (deny-argv, INCOMPLETE label, toplevel worktree), rebuttal-fail fail-closed, budget ISO-stamp, eval score_ok/threshold/K-clamp.
+  - F doctrine: CONTRACT training pairing-rule, guard surfaces the nightly SUITE-RED flag once.
+  - #3 Ollama scout: zero-quota local rung, self-gated by --verify, path-traversal rejected, falls through to the paid builder; both paths LIVE-verified (fake ollama server).
+- **Verify**: suite 143/143; scout + dual-status + eval-red-log live-checked; mutation-train extended to 17 mutations (pairing rule) — running to completion in background.
+- **LIVE CONFIRMATION**: the mutation-train EXIT-trap (self-found last session) restored a clean tree after a 550s timeout SIGTERM — the fix works under real interruption.
+- **Shell lessons paid**: backtick inside python -c '...' opens a nested command-sub inside $(...); a ' inside -c '...' closes the outer quote -> use heredoc+env. $?-reset by `local x;` bit the reflex-drill.
+- **STATE**: branch feat/bash-port, ~23 commits ahead of main, tree clean, suite 143/143, unpushed. Backlog: 0 open.
