@@ -76,7 +76,7 @@ mutate harness/bin/loop-runner.sh 's/if (( stall >= 1 )); then/if false; then/' 
 # newer guards (pairing rule: every fail-closed guard gets a mutation)
 mutate lib/import-scan.sh 's/\[\[ \${#SUPPLY_LINES\[@\]} -gt 0 \]\] && blocked=true/:/' \
   "import-scan: supply-chain block disabled"
-mutate lib/test-guard.sh 's/pytest\\\\.ini/DISABLEDpytest.ini/' \
+mutate lib/test-guard.sh 's/pytest\\.ini/DISABLEDini/' \
   "test-guard: pytest.ini config no longer guarded"
 mutate dual-merge.sh 's/\[\[ "\$cur_now" == "\$INTO" \]\] || fail/true || fail/' \
   "dual-merge: wrong-branch checkout assertion removed"
