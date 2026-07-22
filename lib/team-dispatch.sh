@@ -590,8 +590,9 @@ for p in json.loads(os.environ.get("PATHS_JSON") or "[]"):
     prefixes.append(p if p.endswith("/") else p + "/")
 
 # Harness / orchestration surfaces — never success, never trespass.
-noise_prefixes = (".dual-agent/", "ledger/")
-noise_names = ("HANDOFF.md", "PLAN.md", "WORK.json", "MEMORY.md")
+# verification/ is Grok Build workflow noise (auto-log etc.), not product scope.
+noise_prefixes = (".dual-agent/", "ledger/", "verification/", ".grok/")
+noise_names = ("HANDOFF.md", "PLAN.md", "WORK.json", "MEMORY.md", "AGENTS.md", "CLAUDE.md")
 # Common local artifacts that must never fail a package
 noise_suffixes = ("_preview.png", ".pyc")
 noise_contains = ("/__pycache__/",)
