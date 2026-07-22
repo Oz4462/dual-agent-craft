@@ -1,7 +1,12 @@
-# Dual-agent harness artifacts
+# Dual-agent harness artifacts (runtime only)
 .dual-agent/logs/
 .dual-agent/tmp/
-ledger/
+.dual-agent/role-assignment.json
+.dual-agent/run-state.json
+.dual-agent/dual-run.lock
+.dual-agent/*.lock
+ledger/*
+!ledger/.gitkeep
 *.tmp
 
 # Never commit secrets
@@ -21,10 +26,3 @@ Thumbs.db
 .DS_Store
 .vscode/
 tests/vendor/
-dashboard.html
-
-# dual-run runtime state (generated per session)
-.dual-agent/role-assignment.json
-.dual-agent/run-state.json
-.dual-agent/dual-run.lock
-.dual-agent/*.lock
