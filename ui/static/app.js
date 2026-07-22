@@ -16,10 +16,16 @@
   const btnOptions = $("#btnOptions");
 
   let activeRunId = null;
+  /** Run currently attached to SSE (may differ from activeRunId while reconnecting). */
+  let streamingRunId = null;
   let es = null;
   let statusTimer = null;
+  let statusPollMs = 4000;
   let hasMessages = false;
   let msgAnimIndex = 0;
+  /** Dedup activity feed lines (phase / agent milestones). */
+  const activitySeen = new Set();
+  let liveFollow = true;
 
   const DE = {
     ready: "Bereit",
@@ -34,7 +40,12 @@
     you: "Du",
     orchestrator: "Orchestrator",
     system: "System",
+    workStream: "Live-Arbeit (CLI)",
+    activity: "Ereignis",
     thinking: "denkt nach…",
+    logCopy: "Log kopiert",
+    followOn: "Auto-Scroll an",
+    followOff: "Auto-Scroll aus",
     noCli: "Noch kein CLI-Scan",
     noGates: "Noch keine Gate-Ergebnisse",
     readyTag: "bereit",
@@ -294,6 +305,185 @@
       chatScroll.scrollTop = chatScroll.scrollHeight;
     } else if (t) {
       t.remove();
+    }
+  }
+
+  // --- Live work stream (CLI mirror in chat) ------------------------------
+  function ensureLiveWork(runId) {
+    clearEmptyState();
+    let wrap = $("#liveWorkMsg");
+    if (wrap) {
+      const idEl = wrap.querySelector("[data-run-id]");
+      if (idEl) idEl.textContent = runId;
+      return wrap;
+    }
+    wrap = document.createElement("article");
+    wrap.id = "liveWorkMsg";
+    wrap.className = "msg system live-work";
+    wrap.innerHTML = `
+      <div class="msg-inner">
+        <div class="msg-meta">
+          <span>${DE.workStream}</span>
+          <span data-run-id>${escapeHtml(runId)}</span>
+        </div>
+        <div class="msg-body">
+          <div class="live-activity" id="liveActivity" aria-label="Ereignisse"></div>
+          <div class="live-term-wrap">
+            <div class="live-term-bar">
+              <span class="live-term-title">stdout · dual-run</span>
+              <button type="button" class="text-btn" id="btnLiveFollow" title="Auto-Scroll">${DE.followOn}</button>
+            </div>
+            <pre class="live-term" id="liveTerm" aria-live="polite" aria-label="Live CLI Ausgabe"></pre>
+          </div>
+        </div>
+      </div>`;
+    chatScroll.appendChild(wrap);
+    const followBtn = wrap.querySelector("#btnLiveFollow");
+    if (followBtn) {
+      followBtn.addEventListener("click", () => {
+        liveFollow = !liveFollow;
+        followBtn.textContent = liveFollow ? DE.followOn : DE.followOff;
+      });
+    }
+    chatScroll.scrollTop = chatScroll.scrollHeight;
+    return wrap;
+  }
+
+  function finishLiveWork(status, exitCode) {
+    const wrap = $("#liveWorkMsg");
+    if (!wrap) return;
+    wrap.classList.add("live-work-done");
+    const bar = wrap.querySelector(".live-term-title");
+    if (bar) {
+      bar.textContent = `stdout · beendet · ${status || "?"} · exit ${exitCode ?? "—"}`;
+    }
+  }
+
+  /**
+   * Turn raw dual-run / vendor CLI lines into human activity chips + optional
+   * chat milestones (so the chat shows what the CLI is doing).
+   */
+  function classifyLine(line) {
+    const s = String(line || "").trim();
+    if (!s) return null;
+
+    // Phase markers
+    let m = s.match(/\bphase[=\s:]+([CWRGAFT])\b/i) || s.match(/\bPHASE:\s*([CWRGAFT])\b/i);
+    if (m) {
+      const p = m[1].toUpperCase();
+      return { key: `phase-${p}`, kind: "phase", text: `Phase ${p} · ${PHASE_NAMES[p] || p}` };
+    }
+    m = s.match(/\b(Contract|Team-Work|Guards|Assess|Fortify|Test-Merge|Render)\b/i);
+    if (
+      m &&
+      (/^(==+|---+|\[|\*)/.test(s) || /phase|▶|→|starting|start/i.test(s))
+    ) {
+      return { key: `name-${m[1].toLowerCase()}`, kind: "phase", text: m[1] };
+    }
+
+    // Agents / team packages
+    m = s.match(/\bteam\((claude|grok|codex)\)/i) || s.match(/\b(claude|grok|codex)\b.*\b(WP\d+|package|Paket)/i);
+    if (m) {
+      const agent = (m[1] || "").toLowerCase();
+      return {
+        key: `team-${s.slice(0, 80)}`,
+        kind: "agent",
+        agent,
+        text: s.length > 140 ? s.slice(0, 140) + "…" : s,
+      };
+    }
+    if (/\b(claude|grok|codex)\b/i.test(s) && /(call|worker|builder|architect|hardener|review|fortify|plan)/i.test(s)) {
+      const agent = (s.match(/\b(claude|grok|codex)\b/i) || [])[1] || "agent";
+      return {
+        key: `agent-${s.slice(0, 60)}`,
+        kind: "agent",
+        agent: agent.toLowerCase(),
+        text: s.length > 140 ? s.slice(0, 140) + "…" : s,
+      };
+    }
+
+    // Gates
+    if (/import-scan/i.test(s)) {
+      const bad = /BLOCK|FAIL|fail/i.test(s);
+      return { key: `is-${s.slice(0, 40)}`, kind: bad ? "fail" : "gate", text: s.length > 120 ? s.slice(0, 120) + "…" : s };
+    }
+    if (/test-guard/i.test(s)) {
+      const bad = /BLOCK|FAIL|fail/i.test(s);
+      return { key: `tg-${s.slice(0, 40)}`, kind: bad ? "fail" : "gate", text: s.length > 120 ? s.slice(0, 120) + "…" : s };
+    }
+    if (/\b(PASS|ok ✓|✓ ok|EXIT 0)\b/i.test(s) && !/dry-ok/i.test(s)) {
+      return { key: `ok-${s.slice(0, 50)}`, kind: "ok", text: s.length > 120 ? s.slice(0, 120) + "…" : s };
+    }
+    if (/\b(BLOCKED|FAIL-CLOSED|FAIL|error:|fatal)\b/i.test(s)) {
+      return { key: `fail-${s.slice(0, 50)}`, kind: "fail", text: s.length > 140 ? s.slice(0, 140) + "…" : s };
+    }
+    if (/\[exit\s+\d+\]/i.test(s)) {
+      return { key: `exit-${s}`, kind: /exit 0/i.test(s) ? "ok" : "fail", text: s };
+    }
+    if (/^\$\s/.test(s)) {
+      return { key: `cmd-${s.slice(0, 60)}`, kind: "cmd", text: s.length > 120 ? s.slice(0, 120) + "…" : s };
+    }
+    // PLAN / commit milestones
+    if (/wrote PLAN|PLAN\.md|Contract ready|baton\s*->/i.test(s)) {
+      return { key: `mile-${s.slice(0, 50)}`, kind: "phase", text: s.length > 120 ? s.slice(0, 120) + "…" : s };
+    }
+    if (/^team\([^)]+\):/i.test(s) || /\[no-push\]/i.test(s)) {
+      return { key: `commit-${s.slice(0, 60)}`, kind: "ok", text: s.length > 120 ? s.slice(0, 120) + "…" : s };
+    }
+    return null;
+  }
+
+  function pushActivity(evt) {
+    if (!evt || !evt.key || activitySeen.has(evt.key)) return;
+    activitySeen.add(evt.key);
+    // cap memory
+    if (activitySeen.size > 400) {
+      const first = activitySeen.values().next().value;
+      activitySeen.delete(first);
+    }
+    ensureLiveWork(activeRunId || streamingRunId || "run");
+    const box = $("#liveActivity");
+    if (!box) return;
+    const row = document.createElement("div");
+    row.className = `act act-${evt.kind || "info"}${evt.agent ? ` act-agent-${evt.agent}` : ""}`;
+    const who = evt.agent ? evt.agent : evt.kind === "cmd" ? "cli" : evt.kind === "phase" ? "phase" : "sys";
+    row.innerHTML = `<span class="act-who">${escapeHtml(who)}</span><span class="act-text">${escapeHtml(
+      evt.text || ""
+    )}</span>`;
+    box.appendChild(row);
+    // keep last ~40 chips
+    while (box.children.length > 40) box.removeChild(box.firstChild);
+    if (liveFollow) chatScroll.scrollTop = chatScroll.scrollHeight;
+  }
+
+  function appendLogLine(line) {
+    const text = String(line ?? "");
+    // side panel
+    if (liveLog) {
+      liveLog.textContent += text + "\n";
+      if (liveFollow) liveLog.scrollTop = liveLog.scrollHeight;
+    }
+    // chat terminal mirror
+    ensureLiveWork(streamingRunId || activeRunId || "run");
+    const term = $("#liveTerm");
+    if (term) {
+      term.textContent += text + "\n";
+      // keep terminal from growing unboundedly in DOM
+      if (term.textContent.length > 200_000) {
+        term.textContent = term.textContent.slice(-150_000);
+      }
+      if (liveFollow) term.scrollTop = term.scrollHeight;
+    }
+    const evt = classifyLine(text);
+    if (evt) pushActivity(evt);
+  }
+
+  function openMissionPanel() {
+    if (isNarrow()) {
+      body.classList.add("panel-open");
+      body.classList.remove("panel-collapsed", "nav-open");
+    } else {
+      body.classList.remove("panel-collapsed");
     }
   }
 
@@ -593,40 +783,77 @@
       if (status.role_assignment) renderWho(status.role_assignment);
       if (
         status.active_run &&
-        status.active_run.status === "running" &&
-        status.active_run.id !== activeRunId
+        (status.active_run.status === "running" || status.active_run.status === "queued") &&
+        status.active_run.id !== streamingRunId
       ) {
-        attachStream(status.active_run.id);
+        attachStream(status.active_run.id, { seedTail: status.active_run.tail });
+      }
+      // Faster status while a run is live (work packages / pipeline)
+      const running =
+        status.active_run &&
+        (status.active_run.status === "running" || status.active_run.status === "queued");
+      const wantMs = running ? 2000 : 4000;
+      if (statusTimer && wantMs !== statusPollMs) {
+        statusPollMs = wantMs;
+        clearInterval(statusTimer);
+        statusTimer = setInterval(refreshStatus, statusPollMs);
       }
     } catch (e) {
       console.warn("status", e);
     }
   }
 
-  function attachStream(runId) {
+  function attachStream(runId, { seedTail } = {}) {
+    if (streamingRunId === runId && es) return;
     if (es) {
       es.close();
       es = null;
     }
     activeRunId = runId;
+    streamingRunId = runId;
+    activitySeen.clear();
     btnCancel.disabled = false;
     btnCancel.hidden = false;
-    $("#logMeta").textContent = runId;
-    liveLog.textContent = "";
+    openMissionPanel();
+    if ($("#logMeta")) $("#logMeta").textContent = runId;
+    if (liveLog) liveLog.textContent = "";
+    ensureLiveWork(runId);
+    const term = $("#liveTerm");
+    if (term) term.textContent = "";
+    const act = $("#liveActivity");
+    if (act) act.innerHTML = "";
+
+    // Replay any lines already buffered (reconnect / late open)
+    if (Array.isArray(seedTail)) {
+      for (const line of seedTail) appendLogLine(line);
+    }
+
+    pushActivity({
+      key: `start-${runId}`,
+      kind: "phase",
+      text: `Lauf gestartet · ${runId}`,
+    });
+
     es = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
     es.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
-        if (data.line) {
-          liveLog.textContent += data.line + "\n";
-          liveLog.scrollTop = liveLog.scrollHeight;
-        }
+        if (data.line) appendLogLine(data.line);
         if (data.done) {
           es.close();
           es = null;
+          streamingRunId = null;
           btnCancel.disabled = true;
           btnCancel.hidden = true;
-          $("#logMeta").textContent = `${data.status || "fertig"} · exit ${data.exit_code}`;
+          if ($("#logMeta")) {
+            $("#logMeta").textContent = `${data.status || "fertig"} · exit ${data.exit_code}`;
+          }
+          finishLiveWork(data.status, data.exit_code);
+          pushActivity({
+            key: `done-${runId}-${data.exit_code}`,
+            kind: data.exit_code === 0 ? "ok" : "fail",
+            text: `Lauf beendet · ${data.status || "?"} · exit ${data.exit_code}`,
+          });
           refreshStatus();
           loadHistory();
           loadPersistence();
@@ -636,7 +863,7 @@
       }
     };
     es.onerror = () => {
-      /* browser retries */
+      /* browser retries SSE */
     };
   }
 
@@ -657,11 +884,7 @@
       if (data.assistant) addMessage(data.assistant);
       if (data.who) renderWho(data.who);
       if (data.run && data.run.id) {
-        attachStream(data.run.id);
-        if (isNarrow()) {
-          body.classList.add("panel-open");
-          body.classList.remove("panel-collapsed");
-        }
+        attachStream(data.run.id, { seedTail: data.run.tail });
       }
       input.value = "";
       autoGrow();
@@ -747,6 +970,30 @@
       alert(e.message || e);
     }
   });
+  const btnLogCopy = $("#btnLogCopy");
+  if (btnLogCopy) {
+    btnLogCopy.addEventListener("click", async () => {
+      const text = (liveLog && liveLog.textContent) || ($("#liveTerm") && $("#liveTerm").textContent) || "";
+      try {
+        await navigator.clipboard.writeText(text);
+        btnLogCopy.textContent = DE.logCopy;
+        setTimeout(() => {
+          btnLogCopy.textContent = "Kopieren";
+        }, 1500);
+      } catch (_) {
+        /* ignore */
+      }
+    });
+  }
+  const btnLogExpand = $("#btnLogExpand");
+  if (btnLogExpand) {
+    btnLogExpand.addEventListener("click", () => {
+      const card = document.querySelector(".card-log");
+      if (!card) return;
+      card.classList.toggle("log-expanded");
+      btnLogExpand.textContent = card.classList.contains("log-expanded") ? "Klein" : "Groß";
+    });
+  }
 
   input.addEventListener("input", autoGrow);
   input.addEventListener("keydown", (e) => {

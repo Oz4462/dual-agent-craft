@@ -217,10 +217,14 @@
 
         <section class="card card-log">
           <div class="card-log-head">
-            <h3 class="card-label">Live-Log</h3>
-            <span class="log-badge" id="logMeta">ruhe</span>
+            <h3 class="card-label">Live-Log (CLI)</h3>
+            <div class="log-tools">
+              <span class="log-badge" id="logMeta">ruhe</span>
+              <button type="button" class="text-btn log-tool" id="btnLogCopy" title="Log kopieren">Kopieren</button>
+              <button type="button" class="text-btn log-tool" id="btnLogExpand" title="Log vergrößern">Groß</button>
+            </div>
           </div>
-          <pre class="log" id="liveLog" aria-label="Lauf-Log"></pre>
+          <pre class="log" id="liveLog" aria-label="Lauf-Log wie in der CLI"></pre>
         </section>
       </aside>
     </div>

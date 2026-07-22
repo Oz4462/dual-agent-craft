@@ -119,7 +119,8 @@ class RunState:
                 "finished_at": self.finished_at,
                 "exit_code": self.exit_code,
                 "line_count": len(self.lines),
-                "tail": self.lines[-80:],
+                # Enough history for dashboard reconnect mid-run
+                "tail": self.lines[-250:],
                 "mode": self.mode,
             }
 
@@ -419,15 +420,28 @@ class App:
             rs.publish(f"$ {' '.join(argv)}\n")
             log_path = self.chat_dir / f"{run_id}.log"
             try:
+                # Line-buffer dual-run so the dashboard sees CLI output live
+                # (not one dump at process end). stdbuf is optional (GNU coreutils).
+                run_argv = list(argv)
+                if shutil.which("stdbuf"):
+                    run_argv = ["stdbuf", "-oL", "-eL"] + run_argv
                 with open(log_path, "w", encoding="utf-8") as logf:
                     proc = subprocess.Popen(
-                        argv,
+                        run_argv,
                         cwd=str(self.root),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
                         bufsize=1,
-                        env={**os.environ, "LC_ALL": "C", "PYTHONUNBUFFERED": "1"},
+                        env={
+                            **os.environ,
+                            "LC_ALL": "C",
+                            "PYTHONUNBUFFERED": "1",
+                            # Prefer streamy vendor CLIs when they honor these
+                            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": os.environ.get(
+                                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"
+                            ),
+                        },
                     )
                     rs.proc = proc
                     assert proc.stdout is not None
@@ -438,7 +452,7 @@ class App:
                     code = proc.wait()
                     rs.exit_code = code
                     rs.status = "succeeded" if code == 0 else "failed"
-                    rs.publish(f"\n[exit {code}]\n")
+                    rs.publish(f"[exit {code}]")
             except Exception as e:
                 rs.status = "failed"
                 rs.exit_code = 1
