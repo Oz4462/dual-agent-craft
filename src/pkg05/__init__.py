@@ -1,7 +1,7 @@
-"""WP06 — core_impl: pure stdlib multiply(a, b) under owned path src/pkg05/.
+"""WP06 — core_impl under owned path src/pkg05/ (A6: no imports in multiply.py).
 
-Exports ``multiply`` for package discovery (same pattern as sibling packages).
-Implementation lives in ``multiply.py`` (stdlib only, zero non-typing imports).
+Re-exports ``multiply`` for package discovery. Implementation lives in
+``multiply.py`` and uses zero import statements (stdlib typing optional only).
 """
 
 from .multiply import multiply
