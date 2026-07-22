@@ -33,7 +33,11 @@ done
 
 # Default patterns for what counts as a test/verify file (case-insensitive).
 # Covers pytest, unittest, jest/vitest, go, rust, and a conventional verify/ dir.
-PATTERN='(^|/)(tests?|__tests__|spec)/|(^|/)conftest\.py$|(^|/)verify/|_test\.(py|js|ts|go|rs)$|\.test\.(js|ts|jsx|tsx)$|\.spec\.(js|ts|jsx|tsx)$|(^|/)test_[^/]+\.py$|_spec\.rb$'
+# Test/verify FILES plus dedicated test-RUNNER config files that have no
+# non-test purpose (audit P1: the builder could neuter the eval by loosening
+# pytest.ini/jest.config without touching a single test file). pyproject.toml /
+# package.json are deliberately EXCLUDED — they carry real impl config too.
+PATTERN='(^|/)(tests?|__tests__|spec)/|(^|/)conftest\.py$|(^|/)verify/|_test\.(py|js|ts|go|rs)$|\.test\.(js|ts|jsx|tsx)$|\.spec\.(js|ts|jsx|tsx)$|(^|/)test_[^/]+\.py$|_spec\.rb$|(^|/)(pytest\.ini|tox\.ini|\.coveragerc)$|(^|/)(jest|vitest)\.config\.(js|ts|mjs|cjs)$|(^|/)\.mocharc(\..*)?$|(^|/)jest\.setup\.(js|ts)$'
 [[ -n "$EXTRA" ]] && PATTERN="$PATTERN|$EXTRA"
 
 files=()

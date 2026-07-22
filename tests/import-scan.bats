@@ -93,3 +93,47 @@ scan() { run "$HARNESS_ROOT/lib/import-scan.sh" --out "$SCRATCH/scan.json" "$@";
   [ "$status" -eq 0 ]
   [[ "$output" == *"off-contract check DISABLED"* ]]
 }
+
+@test "AUDIT-P2: allow-list entries are whitespace-trimmed ('requests, numpy')" {
+  echo 200 > "$REGISTRY/requests.status"; echo 200 > "$REGISTRY/numpy.status"
+  scan --diff-text $'+import requests\n+import numpy' --ecosystem python --allow "requests, numpy"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "PASS" ]
+}
+
+@test "AUDIT-P1: --plan reads the allow-list from PLAN (off-contract still fires)" {
+  echo 200 > "$REGISTRY/requests.status"; echo 200 > "$REGISTRY/evilpkg.status"
+  printf -- '- Erlaubte Dependencies: requests, numpy\n' > "$SCRATCH/PLAN.md"
+  scan --diff-text $'+import requests\n+import evilpkg' --ecosystem python --plan "$SCRATCH/PLAN.md"
+  [ "$status" -eq 2 ]
+  [ "$(jfield "$SCRATCH/scan.json" off_contract.0.pkg)" = "evilpkg" ]
+}
+
+@test "AUDIT-P1: --plan 'stdlib only' keeps off-contract ARMED (not disabled)" {
+  echo 200 > "$REGISTRY/requests.status"
+  printf -- '- Erlaubte Dependencies: stdlib only\n' > "$SCRATCH/PLAN.md"
+  scan --diff-text $'+import requests' --ecosystem python --plan "$SCRATCH/PLAN.md"
+  [ "$status" -eq 2 ]
+}
+
+@test "AUDIT-P1: supply-chain — git+ source in requirements.txt is BLOCKED" {
+  scan --diff-text $'+++ b/requirements.txt\n+evil @ git+https://github.com/x/y' --ecosystem python
+  [ "$status" -eq 2 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "BLOCK" ]
+}
+
+@test "AUDIT-P1: supply-chain — clean pinned requirement passes; a URL in SOURCE code is not flagged" {
+  echo 200 > "$REGISTRY/requests.status"
+  scan --diff-text $'+++ b/requirements.txt\n+requests==2.31.0' --ecosystem python
+  [ "$status" -eq 0 ]
+  scan --diff-text $'+++ b/src/app.py\n+URL = "https://api.example.com"' --ecosystem python
+  [ "$status" -eq 0 ]
+}
+
+@test "AUDIT-P2: registry-unreachable -> WARN-unreachable exit 0 (unknown, not invented/off)" {
+  : > "$REGISTRY/somepkg.status"   # empty status file => unreachable
+  scan --diff-text $'+import somepkg' --ecosystem python --allow "somepkg"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "WARN-unreachable" ]
+  [ "$(jfield "$SCRATCH/scan.json" unknown.0.pkg)" = "somepkg" ]
+}

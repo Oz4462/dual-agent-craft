@@ -100,3 +100,13 @@ guard() { run "$HARNESS_ROOT/lib/test-guard.sh" --out "$SCRATCH/tg.json" "$@"; }
   [ "$status" -eq 0 ]
   cd - >/dev/null
 }
+
+@test "AUDIT-P1: test-runner configs (pytest.ini/jest.config) BLOCK; pyproject/package.json don't" {
+  guard --diff-files "pytest.ini";                [ "$status" -eq 2 ]
+  guard --diff-files "tox.ini";                   [ "$status" -eq 2 ]
+  guard --diff-files ".coveragerc";               [ "$status" -eq 2 ]
+  guard --diff-files "jest.config.ts";            [ "$status" -eq 2 ]
+  guard --diff-files "vitest.config.js";          [ "$status" -eq 2 ]
+  guard --diff-files "pyproject.toml";            [ "$status" -eq 0 ]
+  guard --diff-files "package.json";              [ "$status" -eq 0 ]
+}

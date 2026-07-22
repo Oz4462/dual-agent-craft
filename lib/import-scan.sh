@@ -24,7 +24,7 @@ _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$_HERE/common.sh"
 
-POC="feat/poc"; BASE="main"; DIFF_TEXT=""; ALLOW=""; ECO="auto"
+POC="feat/poc"; BASE="main"; DIFF_TEXT=""; ALLOW=""; ECO="auto"; PLAN=""
 CHECK_PROV=false; SUSPECT_AGE=30; BLOCK_SUSPECT=false; OUTFILE=""; TIMEOUT=12
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,6 +32,7 @@ while [[ $# -gt 0 ]]; do
     --base)           BASE="${2:?value required for $1}"; shift 2;;
     --diff-text)      DIFF_TEXT="${2:?value required for $1}"; shift 2;;
     --allow)          ALLOW="${2:?value required for $1}"; shift 2;;
+    --plan)           PLAN="${2:?value required for $1}"; shift 2;;
     --ecosystem)      ECO="${2:?value required for $1}"; shift 2;;
     --check-provenance) CHECK_PROV=true; shift;;
     --suspect-age-days) SUSPECT_AGE="${2:?value required for $1}"; shift 2;;
@@ -100,9 +101,59 @@ for name, kind in pkgs.items():
 PY
 )
 
-# Loud, once: with no allow-list the off-contract half of the gate cannot fire
-# (registry-404 check still runs). Silent-disable was an audit finding.
-[[ -z "$ALLOW" ]] && warn "import-scan: no --allow list given -> off-contract check DISABLED (registry-only mode). Pass --allow from PLAN 'Erlaubte Dependencies' for the full gate."
+# --- Manifest supply-chain pass (audit P1) ---------------------------------
+# A registry-name scan can't see deps pulled straight from git/urls/files.
+# Track the current +++ file; in a dependency manifest, flag any ADDED line
+# using a non-registry source scheme. Deterministic, zero tokens.
+mapfile -t SUPPLY_LINES < <(DIFF_TEXT="$DIFF_TEXT" python3 - <<'PY'
+import os, re
+diff = os.environ["DIFF_TEXT"]
+cur = ""
+manifest = re.compile(r'(requirements[^/]*\.txt|pyproject\.toml|package\.json|Pipfile|setup\.py|setup\.cfg)$')
+scheme = re.compile(r'(git\+[a-z]+://|git@|(^|["\s:=])https?://|(^|["\s])file:|["\s]github:|["\s]gitlab:|["\s]bitbucket:)', re.I)
+for raw in diff.splitlines():
+    if raw.startswith('+++'):
+        m = re.match(r'\+\+\+ b/(.*)', raw); cur = m.group(1) if m else ""
+        continue
+    if raw.startswith('---') or raw.startswith('@@'):
+        continue
+    added = raw[1:] if raw.startswith('+') else (raw if raw and raw[0] not in ' -' else None)
+    if added is None or not cur or not manifest.search(cur):
+        continue
+    if scheme.search(added):
+        frag = added.strip()[:80].replace('\t', ' ')
+        print(f"{cur}\t{frag}")
+PY
+)
+
+# --plan: derive the allow-list from PLAN's "Erlaubte Dependencies:" line when no
+# explicit --allow was given (audit P1: the NEXT hint used to print a placeholder
+# the operator hand-filled). "stdlib only" -> empty allow-list but the off-contract
+# check stays ARMED (via PLAN_ARMED) instead of the silent-disable an unset ALLOW triggers.
+PLAN_ARMED=false
+if [[ -z "$ALLOW" && -n "$PLAN" && -f "$PLAN" ]]; then
+  PLAN_ARMED=true
+  # Heredoc (not -c '...'): the extraction needs quotes AND a backtick, both of
+  # which break an inline single-quoted -c inside $(...). Env var + heredoc is safe.
+  ALLOW="$(PLANFILE="$PLAN" python3 <<'PY'
+import os, re
+txt = open(os.environ["PLANFILE"], encoding="utf-8", errors="replace").read()
+m = re.search(r"Erlaubte Dependencies:\s*(.+)", txt)
+if not m:
+    print(""); raise SystemExit
+val = m.group(1).strip()
+if re.fullmatch(r"(?i)stdlib[\s-]*only\.?", val):
+    print(""); raise SystemExit
+strip_chars = chr(96) + "\"'\t "   # backtick + quotes + tab + space
+parts = [p.strip(strip_chars) for p in re.split(r"[,\s]+", val) if p.strip(strip_chars)]
+print(",".join(parts))
+PY
+)"
+fi
+
+# Loud, once: with no allow-list AND no --plan the off-contract half of the gate
+# cannot fire (registry-404 check still runs). Silent-disable was an audit finding.
+[[ -z "$ALLOW" && "$PLAN_ARMED" == false ]] && warn "import-scan: no --allow/--plan given -> off-contract check DISABLED (registry-only mode). Pass --allow or --plan for the full gate."
 
 # --- Registry check (real or stubbed for tests) ----------------------------
 # Prints the HTTP status for a package, honouring IMPORT_SCAN_REGISTRY_BASE.
@@ -163,7 +214,14 @@ PY
 }
 
 in_list() { local needle="$1"; shift; for x in "$@"; do [[ "$x" == "$needle" ]] && return 0; done; return 1; }
+
 IFS=',' read -ra ALLOW_ARR <<<"$ALLOW"
+# Trim surrounding whitespace on each entry (audit P2): "requests, numpy" must
+# match "numpy", not " numpy" -> otherwise a legit dep is a false OFF-CONTRACT block.
+for i in "${!ALLOW_ARR[@]}"; do
+  a="${ALLOW_ARR[$i]#"${ALLOW_ARR[$i]%%[![:space:]]*}"}"   # ltrim
+  ALLOW_ARR[$i]="${a%"${a##*[![:space:]]}"}"                # rtrim
+done
 
 invented=(); off_contract=(); okpkgs=(); unknown=(); suspect=()
 scanned=0
@@ -176,7 +234,9 @@ for pl in "${PKG_LINES[@]}"; do
     okpkgs+=("$pkg:$kind:stdlib"); continue
   fi
   in_allow=false
-  { [[ -z "$ALLOW" ]] || in_list "$pkg" "${ALLOW_ARR[@]}"; } && in_allow=true
+  # armed (allow given or --plan): membership decides. unarmed (no list): allow all.
+  if [[ -z "$ALLOW" && "$PLAN_ARMED" == false ]]; then in_allow=true
+  elif in_list "$pkg" "${ALLOW_ARR[@]}"; then in_allow=true; fi
   status="$(registry_status "$pkg" "$kind")"
   if [[ "$status" == "404" ]]; then invented+=("$pkg:$kind:registry-404"); continue; fi
   if [[ -z "$status" ]]; then unknown+=("$pkg:$kind:registry-unreachable"); continue; fi
@@ -193,6 +253,7 @@ done
 blocked=false
 { [[ ${#invented[@]} -gt 0 ]] || [[ ${#off_contract[@]} -gt 0 ]]; } && blocked=true
 { [[ "$BLOCK_SUSPECT" == true ]] && [[ ${#suspect[@]} -gt 0 ]]; } && blocked=true
+[[ ${#SUPPLY_LINES[@]} -gt 0 ]] && blocked=true   # non-registry manifest source = fail-closed
 
 verdict="PASS"
 if [[ "$blocked" == true ]]; then verdict="BLOCK"
@@ -208,14 +269,26 @@ arr.append({"pkg":p,"kind":k,"why":w}); print(json.dumps(arr))
 PY
 ); done; printf '%s' "$out"; }
 
+# supply-chain findings as JSON (file<TAB>fragment lines)
+supply_json="$(python3 - <<'PY' "${SUPPLY_LINES[@]:-}"
+import sys, json
+out=[]
+for e in sys.argv[1:]:
+    if not e: continue
+    f,_,frag = e.partition("\t")
+    out.append({"file":f,"source":frag})
+print(json.dumps(out))
+PY
+)"
 python3 - "$OUTFILE" "$BASE" "$POC" "$scanned" "$verdict" "$(iso_now)" \
   "$(arr_json "${invented[@]}")" "$(arr_json "${off_contract[@]}")" \
-  "$(arr_json "${suspect[@]}")" "$(arr_json "${unknown[@]}")" "$(arr_json "${okpkgs[@]}")" <<'PY'
+  "$(arr_json "${suspect[@]}")" "$(arr_json "${unknown[@]}")" "$(arr_json "${okpkgs[@]}")" "$supply_json" <<'PY'
 import sys, json
-out, base, poc, scanned, verdict, stamp, inv, off, sus, unk, ok = sys.argv[1:12]
+out, base, poc, scanned, verdict, stamp, inv, off, sus, unk, ok, supply = sys.argv[1:13]
 obj = {"base":base,"poc":poc,"scanned":int(scanned),
   "invented":json.loads(inv),"off_contract":json.loads(off),"suspect":json.loads(sus),
-  "unknown":json.loads(unk),"ok":json.loads(ok),"verdict":verdict,"stamp":stamp}
+  "unknown":json.loads(unk),"ok":json.loads(ok),"supply_chain":json.loads(supply),
+  "verdict":verdict,"stamp":stamp}
 open(out,"w",encoding="utf-8").write(json.dumps(obj, indent=2))
 PY
 
@@ -227,5 +300,6 @@ printf '%simport-scan: %s scanned | invented=%s off-contract=%s suspect=%s unkno
 for i in "${invented[@]}";     do printf '%s  INVENTED:     %s%s\n' "$C_RED" "${i%%:*}" "$C_RESET"; done
 for o in "${off_contract[@]}"; do printf '%s  OFF-CONTRACT: %s%s\n' "$C_RED" "${o%%:*}" "$C_RESET"; done
 for s in "${suspect[@]}";      do printf '%s  SLOPSQUAT?:   %s%s\n' "$C_YELLOW" "$s" "$C_RESET"; done
+for sc in "${SUPPLY_LINES[@]:-}"; do [[ -n "$sc" ]] && printf '%s  SUPPLY-CHAIN: %s%s\n' "$C_RED" "${sc//$'\t'/ -> }" "$C_RESET"; done
 
 [[ "$blocked" == true ]] && exit 2 || exit 0
