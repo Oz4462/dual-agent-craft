@@ -1,16 +1,19 @@
-"""WP01 — multiply module under package path (stdlib only).
+"""WP01 core_impl — pure stdlib multiply(a, b).
 
-Re-export of the package-level multiply for import compatibility.
-No third-party imports; no I/O; no side effects.
+Contract (PLAN.md §3):
+  multiply(a: int | float, b: int | float) -> int | float
+  - bool is rejected (fail-closed; bool is an int subclass)
+  - int * int -> int; otherwise float (Python * semantics)
+  - TypeError on non-number inputs; no duck-typing via __mul__
+  - no I/O, no side effects, no imports beyond optional typing
 """
 
 
 def multiply(a, b):
-    """Return the arithmetic product a * b.
+    """Return the product a * b for int/float operands only.
 
-    Accepts int or float only (bool is rejected). int*int yields int;
-    otherwise float (standard Python ``*`` semantics). Raises TypeError
-    with a clear message when either argument is not a real number type.
+    Raises TypeError if either argument is not exactly int or float
+    (bool, str, None, list, and other types are rejected).
     """
     if type(a) is not int and type(a) is not float:
         raise TypeError(

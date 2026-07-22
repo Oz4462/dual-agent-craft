@@ -44,3 +44,15 @@ VERIFY_CMD: <z.B. pytest -q   oder   npm test>
 - phase complete.
 - adaptive: builder=grok assessor=claude profile=minimal team-work=true
 - BATON -> team  (next phase W)
+
+### [2026-07-22T17:39:03Z] team — W
+- Team packages done (ledger/WORK.json) — Claude+Grok+Codex all worked
+- phase complete.
+- adaptive: builder=grok assessor=claude profile=minimal team-work=true
+- BATON -> gate  (next phase G)
+
+### [2026-07-22T17:50:00Z] claude — C
+- Contract ready: PLAN.md — next team work (all three code)
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- BATON -> team  (next phase W)

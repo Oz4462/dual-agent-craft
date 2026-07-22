@@ -1,8 +1,4 @@
-"""WP01 — core_impl: pure stdlib multiply(a, b).
-
-Exports ``multiply`` for package discovery (same pattern as prior team packages).
-Implementation lives in ``multiply.py`` (stdlib only, no side effects).
-"""
+"""WP01 — core_impl package: export multiply for discovery under src/pkg00/."""
 
 from .multiply import multiply
 
