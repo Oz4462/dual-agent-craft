@@ -750,11 +750,16 @@
 
   input.addEventListener("input", autoGrow);
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    // Chat-Standard: Enter sendet, Shift+Enter = Zeilenumbruch (Ctrl/Cmd+Enter geht auch)
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       send({ previewOnly: false });
     }
   });
+
+  // Plattformgerechter Shortcut-Hint (Linux/Windows: Strg statt ⌘)
+  const kbdHint = document.querySelector("#btnSend .kbd");
+  if (kbdHint && !/Mac/i.test(navigator.platform)) kbdHint.textContent = "↵";
 
   document.querySelectorAll(".template").forEach((btn) => {
     btn.addEventListener("click", () => {
