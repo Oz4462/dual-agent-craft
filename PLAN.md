@@ -1,54 +1,26 @@
-# PLAN — Pure-Stdlib Multiply
+All access paths to the repo are blocked, so I have to stop and report rather than fabricate a contract.
 
-> Claude füllt das aus. Grok baut strikt dagegen. Kein Code in diesem File.
-> Dieser Build kennt KEINEN Kontext ausser dem, was hier steht.
+**BLOCKED — PLAN.md cannot be written: the verdiscan repository is unreachable from this session.**
 
-## 1. Problem
-Es soll eine minimale, reine Python-Funktion `multiply(a, b)` gebaut werden, die das Produkt zweier Zahlen zurückgibt. Dazu gehören Unit-Tests, die mindestens den Happy Path (2·3=6) und Null-Fälle abdecken. Kein weiterer Funktionsumfang.
+I hold the BATON (Phase C, Contract), but the contract phase requires knowing what `https://github.com/emreozyoruk/verdiscan.git` contains and where work left off — and every avenue to inspect it was denied in this non-interactive session:
 
-## 2. Stack / Constraints
-- Sprache/Framework: Python 3.10+ (getestet gegen die vorhandene System-Python-3-Installation), Tests mit `unittest` aus der stdlib
-- Erlaubte Dependencies: stdlib only (`unittest`; optional `typing`-Konstrukte)
-- Verbote: keine Netzwerkzugriffe, keine Subprozesse, keine Secrets, keine globalen Installs, keine Third-Party-Packages (kein pytest), kein Zugriff auf `os.environ`, keine Dateisystem-Schreibzugriffe zur Laufzeit
+- No `Bash` tool in this context, so `git clone` / `curl` are impossible directly.
+- An **Explore** agent and a **general-purpose** agent both tried: shell execution ("requires approval"), Playwright browser navigation (permission not granted), and the alphaXiv GitHub-reader tool (permission not granted). I also tried the GitHub-reader tool from my own context — same denial.
+- There is no local copy: the workspace `/home/genesis/dual-agent-craft` contains zero files or text mentions matching `verdiscan`, and reads outside the working directory are permission-blocked.
 
-## 3. Interface-Contract (die einzige Wahrheit, die beide teilen)
-Dateien (relativ zur Build-Wurzel):
-- `multiply.py` — enthält ausschliesslich die Funktion `multiply` (plus optional Docstring/Type-Hints)
-- `tests/test_multiply.py` — `unittest`-Testfälle gegen `multiply.py`
+I will not fill the template from guesses. A PLAN.md with invented module names, signatures, and acceptance criteria is exactly the "hallucinated APIs" failure mode this harness's Assess phase exists to catch — Grok would build against fiction, and every downstream gate would be verifying fabricated requirements.
 
-```
-# multiply.py
-# function multiply(a: int | float, b: int | float) -> int | float
-#   - a, b: numerische Werte (int oder float); keine Typkonvertierung von Strings
-#   - returns: das arithmetische Produkt a * b
-#   - raises: TypeError bei nicht-numerischen Argumenten (z.B. str, None, list) —
-#     das native TypeError des *-Operators genügt; kein eigenes Exception-Handling nötig
-#   - keine Seiteneffekte, kein I/O, kein globaler Zustand
+**Any one of these unblocks the Contract phase (re-dispatch me afterwards):**
 
-# tests/test_multiply.py
-# class TestMultiply(unittest.TestCase) mit Testmethoden gemäss Abschnitt 5
-# Ausführbar via: python3 -m unittest discover -s tests
-```
+1. **Best:** Hermes clones the repo into the workspace, e.g. `git clone https://github.com/emreozyoruk/verdiscan.git /home/genesis/dual-agent-craft/verdiscan` — my Read/Glob/Grep work there without approval, and I can write a grounded PLAN.md immediately.
+2. Run this session interactively or pre-grant `Bash` (or at least `git clone` + `curl`), so I can inspect the repo myself.
+3. Pre-grant the `mcp__claude_ai_alphaXiv__read_files_from_github_repository` tool (covers README, file tree, manifests, and source signatures — enough for a contract, though not commit history or branches).
+4. Include the task definition inline in the dispatch: what feature of verdiscan to continue, plus the relevant module signatures/README excerpt.
 
-## 4. Akzeptanzkriterien (verifizierbar, binär)
-- [ ] `python3 -c "from multiply import multiply; assert multiply(2, 3) == 6"` läuft ohne Fehler durch
-- [ ] `python3 -c "from multiply import multiply; assert multiply(0, 5) == 0 and multiply(5, 0) == 0"` läuft ohne Fehler durch
-- [ ] `python3 -m unittest discover -s tests` beendet sich mit Exit-Code 0 und mindestens 3 ausgeführten Tests
-- [ ] `grep -E "socket|urllib|http|requests|subprocess|os\.environ" multiply.py tests/test_multiply.py` liefert keinen Treffer (Exit-Code 1)
-- [ ] `multiply.py` enthält keine `import`-Statements ausser optional `typing`-Konstrukten
+State unchanged: BATON remains `claude`, PHASE remains `C`, no files written, `PLAN.md` still holds the completed previous contract (Pure-Stdlib Multiply).
 
-## 5. Test-Liste (Claude härtet diese in Schritt F)
-- Happy path: `multiply(2, 3) == 6`
-- Null-Fälle: `multiply(0, 5) == 0`, `multiply(5, 0) == 0`, `multiply(0, 0) == 0`
-- Negative Zahlen: `multiply(-2, 3) == -6`, `multiply(-2, -3) == 6`
-- Float: `multiply(2.5, 4) == 10.0` (exakte Binärwerte, kein Rundungs-Epsilon nötig)
-- Fehlerfall / Fail-closed: `multiply("2", 3)` und `multiply(None, 3)` lösen `TypeError` aus (via `assertRaises`)
-
-## 6. Out of Scope
-- Keine CLI, kein `argparse`, kein `__main__`-Block
-- Keine Eingabe-Parsing- oder String-zu-Zahl-Konvertierung
-- Keine Unterstützung für `Decimal`, `Fraction`, `complex` oder NumPy-Typen (werden weder getestet noch explizit abgelehnt)
-- Kein Logging, keine Konfiguration, keine Packaging-Artefakte (`pyproject.toml`, `setup.py`)
-- Keine Performance-Optimierung, keine Overflow-Behandlung (Python-int ist beliebig gross)
-- Keine weiteren Module oder Hilfsfunktionen über `multiply` hinaus
+SUGGESTIONS:
+- Prefer option 1 (clone into workspace) — it is one command for Hermes and gives full ground truth including tests and half-finished areas.
+- If verdiscan becomes the ongoing target, consider making the clone a permanent sibling checkout and pointing `VERIFY_CMD` in HANDOFF.md at its real test entrypoint once known.
+- The dispatch prompt should state *which* feature to continue ("wir arbeiten hier weiter" names the repo but not the work item); otherwise the Contract phase must reverse-engineer intent from TODOs and open issues.
 
