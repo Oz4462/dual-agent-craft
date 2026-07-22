@@ -1,0 +1,29 @@
+{
+  "_comment": "Hook wiring for ~/.claude/settings.json. install.sh rewrites __HOOKS_DIR__ to the installed absolute path. Exit 2 in a PreToolUse hook = block.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "__HOOKS_DIR__/guard-bad-calls.sh" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "__HOOKS_DIR__/format-and-log.sh" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "__HOOKS_DIR__/clean-exit.sh" }
+        ]
+      }
+    ]
+  }
+}

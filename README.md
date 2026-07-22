@@ -6,13 +6,15 @@
 
 A local build harness where **Claude Code** (architect/reviewer) and **Grok CLI** (builder) collaborate across vendor lines — and an **objective `pass^k` eval**, never their agreement, decides what ships.
 
-![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE?logo=powershell&logoColor=white)
+![Bash](https://img.shields.io/badge/Bash-5.x_Linux%2FmacOS-4EAA25?logo=gnubash&logoColor=white)
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1_Windows-5391FE?logo=powershell&logoColor=white)
 ![Claude Code](https://img.shields.io/badge/Claude_Code-architect%2Freviewer-D97757)
 ![Grok CLI](https://img.shields.io/badge/Grok_CLI-builder-111111)
+![Codex](https://img.shields.io/badge/Codex-3rd_vendor%2C_sandboxed-10a37f)
 ![Ollama](https://img.shields.io/badge/Ollama-zero--quota_scout-000000?logo=ollama&logoColor=white)
 ![API keys](https://img.shields.io/badge/API_keys-0-2ea44f)
 ![Merge gate](https://img.shields.io/badge/merge-pass%5Ek_gated-1f6feb)
-![Live-tested](https://img.shields.io/badge/end--to--end-live--verified-2ea44f)
+![Tests](https://img.shields.io/badge/bats_suite-143%2F143-2ea44f)
 
 </div>
 
@@ -69,6 +71,7 @@ Every guard is **deterministic** where possible (nothing in the loop that can it
 | **untrusted-code review** | drift from the contract | Claude reviews Grok's diff as hostile input, file-by-file |
 | **`pass^k` gate** | flaky "green once" merges ([τ-bench: pass@1 ≫ pass@8](https://arxiv.org/abs/2406.12045)) | all K runs must pass — consistency, not luck |
 | **No-Cut merge** | silent overwrites / false "done" | git conflict = abort; red verify = block |
+| **`test-guard`** | the builder gaming the gate by editing tests (invariant 7) | deterministic diff scan for test/verify files, **fail-closed, zero tokens** |
 | **least-privilege Grok** | destructive autonomous tools | `--deny` overrides `--always-approve` |
 | **decorrelation log** | the moat quietly dying | warns if the two vendors stop disagreeing |
 
@@ -87,51 +90,164 @@ Every saving is **quality-preserving** — proven, not assumed:
 
 ---
 
-## 🚀 Quickstart
+## 🖥️ Platforms (Linux · macOS · Windows)
 
-> **Prereqs:** Windows + PowerShell 5.1, `git`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`ollama`](https://ollama.com) for the local scout.
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Full team (`dual-run`, team-dispatch) | ✅ | ✅ Homebrew **bash 5** | ✅ Git Bash or WSL |
+| Classic CRAFT scripts | ✅ bash | ✅ bash 5 | ✅ bash **or** `powershell/*.ps1` |
+| Cockpit | tmux | tmux (brew) | Windows Terminal (`powershell/dual-view.ps1`) |
 
-```powershell
-# 1. C — write the contract (Claude fills PLAN.template.md)
-Copy-Item PLAN.template.md PLAN.md      # ...fill in problem, interface, acceptance, tests...
+Details, install notes, and limitations: **[`PLATFORM.md`](./PLATFORM.md)**.
 
-# 2. R — Grok builds, cheaply first then escalates if needed
-.\dual-build.ps1 -Adaptive -Variants 3 -Verify "py -3 test_yourfeature.py"
+```bash
+# Linux (native)
+./dual-run.sh --status
 
-# 3. guard — block invented/off-contract dependencies
-.\lib\import-scan.ps1 -PocBranch feat/poc -Base main -CheckProvenance
+# macOS (do NOT use system /bin/bash 3.2)
+brew install bash git python3
+/opt/homebrew/bin/bash ./dual-run.sh --status
 
-# 4. A — cross-vendor bounded review (Claude assess + 1 Grok rebuttal)
-.\dual-review.ps1 -PocBranch feat/poc -Base main
-
-# 5. T — merge ONLY if pass^k is green
-.\dual-merge.ps1 -From feat/poc -Into main -Verify "py -3 test_yourfeature.py" -EvalK 5
+# Windows PowerShell → Git Bash / WSL bridge
+.\powershell\dual-run.ps1 --status
+.\powershell\dual-status.ps1
 ```
 
-Split-screen cockpit (watch both agents live): `.\dual-view.ps1`
+## 🚀 Quickstart (Linux / macOS — bash)
+
+> **Prereqs:** bash **4.4+** (5.x preferred; macOS: `brew install bash`), `git`, `python3`, `curl`, [`claude`](https://claude.com/claude-code) + [`grok`](https://x.ai) CLIs (each on its own subscription — **no API keys**), optional [`codex`](https://github.com/openai/codex) as a sandboxed 3rd vendor and [`ollama`](https://ollama.com) for the local scout.
+
+```bash
+# ── One command (recommended): adaptive Claude↔Grok staffelstab ────────────
+# Fine-tuning: config/coordination.json (lock/ownership) + config/roles.json (who-does-what)
+cp PLAN.template.md PLAN.md   # Claude fills contract — or use --auto-plan --task "…"
+
+# See who will do what for THIS task (adaptive profiles: minimal|standard|thorough|security|sandbox)
+./dual-run.sh --who --task "add OAuth payment flow"
+./lib/role-router.sh profiles
+
+./dual-run.sh --task "…" --verify "python3 -m pytest -q"
+# Phases: C → W(team: Claude+Grok+Codex ALL code) → G → A → [F] → T
+# After PLAN: work packages in ledger/WORK.json — architect also implements, not only plans.
+# Adaptive assess/fortify still applies. --no-team-work restores mono-builder R path.
+# Only one dual-run at a time (exclusive lock). Path-disjoint packages prevent double-writes.
+
+./lib/team-dispatch.sh status          # who got which package
+./lib/team-dispatch.sh run --plan PLAN.md --dry-run
+
+./dual-run.sh --status          # baton / phase / lock + who matrix
+./dual-run.sh --dry-run --task "…" --verify true --skip-merge
+./dual-run.sh --profile security --verify "…"   # force a profile
+./dual-run.sh --no-role-adaptive …              # freeze static baseline
+
+# ── Manual step-by-step (same stages dual-run orchestrates) ────────────────
+# 1. C — write the contract (Claude fills PLAN.template.md)
+cp PLAN.template.md PLAN.md          # ...fill in problem, interface, acceptance, tests...
+
+# 2. R — Grok builds, cheaply first then escalates if needed
+./dual-build.sh --adaptive --variants 3 --verify "python3 -m pytest -q"
+
+# 3. guards — block invented deps + test-file tampering (both deterministic, zero tokens)
+./lib/import-scan.sh --poc feat/poc --base main --check-provenance
+./lib/test-guard.sh  --poc feat/poc --base main
+
+# 4. A — cross-vendor bounded review (Claude assess + 1 Grok rebuttal)
+./dual-review.sh --poc feat/poc --base main
+
+# 4b. subjective tie? -> measure, don't argue (invariant 8)
+./dual-tiebreak.sh --verify "python3 -m pytest -q" \
+    --approach-a "lookup table" --approach-b "iterative compute"
+
+# 5. T — merge ONLY if pass^k is green (and the builder didn't touch tests)
+./dual-merge.sh --from feat/poc --into main --verify "python3 -m pytest -q" --eval-k 5 --test-guard
+```
+
+Split-screen cockpit (tmux, watch both agents live): `./dual-view.sh`
+Run the deterministic test suite (offline): `tests/run.sh`
+
+<details>
+<summary><b>Windows — full team path (recommended) + classic PS CRAFT</b></summary>
+
+**Recommended (full team-work / dual-run):** Git Bash or WSL, or the PowerShell bridge:
+
+```powershell
+.\powershell\dual-run.ps1 --dry-run --verify "true" --skip-merge
+.\powershell\dual-run.ps1 --task "feature" --verify "py -3 -m pytest -q"
+.\powershell\dual-status.ps1
+```
+
+**Classic CRAFT (PowerShell 5.1, preserved):**
+
+```powershell
+.\powershell\dual-build.ps1 -Adaptive -Variants 3 -Verify "py -3 test_yourfeature.py"
+.\powershell\lib\import-scan.ps1 -PocBranch feat/poc -Base main -CheckProvenance
+.\powershell\dual-review.ps1 -PocBranch feat/poc -Base main
+.\powershell\dual-merge.ps1 -From feat/poc -Into main -Verify "py -3 test_yourfeature.py" -EvalK 5
+.\powershell\dual-view.ps1
+```
+
+See <code>PLATFORM.md</code> for the full matrix.
+</details>
 
 ---
 
 ## 🧩 Components
 
 ```
-dual-agent/
+dual-agent-craft/
 ├─ PLAN.template.md      📝 the contract template (the single shared truth)
 ├─ PROTOCOL.md          📜 8 coordination invariants (eval decides, 1 writer/space, …)
 ├─ AGENTS.md            🤝 vendor-neutral builder contract (read by Grok/Codex/Cursor/…)
-├─ ADAPTERS.md          🔌 how to plug in a 3rd model
-├─ dual-build.ps1       ⚙️  Render: Grok in an isolated worktree, adaptive-N
-├─ dual-review.ps1      💬 Assess: bounded cross-review, eval decides
-├─ dual-merge.ps1       🧪 No-Cut + pass^k merge gate
-├─ dual-view.ps1        🖥️  split-screen cockpit
-└─ lib/
-   ├─ grok-call.ps1     clean headless Grok wrapper (stdout/stderr OS-separated)
-   ├─ claude-call.ps1   clean headless Claude wrapper (+ cost telemetry)
-   ├─ local-call.ps1    zero-quota Ollama scout
-   ├─ eval-harness.ps1  pass@k / pass^k scorer (lossless early-stop)
-   ├─ import-scan.ps1   deterministic invented-package gate
-   ├─ budget-guard.ps1  fail BLOCKED before credit exhaustion
-   └─ decorrelation.ps1 cross-vendor moat telemetry
+├─ ADAPTERS.md          🔌 how to plug in a 3rd/4th model
+├─ config/coordination.json  🎛️ fine-tuning: roles, ownership, anti-overlap, defaults
+├─ dual-run.sh          🏁 one-command orchestrator (C→R→G→A→F→T, baton + exclusive lock)
+├─ dual-build.sh        ⚙️  Render: Grok in an isolated worktree, adaptive-N
+├─ dual-review.sh       💬 Assess: bounded cross-review, eval decides
+├─ dual-merge.sh        🧪 No-Cut + pass^k merge gate (--test-guard hook)
+├─ dual-tiebreak.sh     🎲 invariant-8 micro-probe: build both, MEASURE the winner
+├─ dual-status.sh       🩺 doctor: CLIs, ledger verdicts, spend, hygiene
+├─ dual-view.sh         🖥️  tmux split-screen cockpit
+├─ lib/
+│  ├─ common.sh         shared helpers (python3-JSON, curl, locale-neutral)
+│  ├─ coordination.sh   baton, exclusive lock, ownership, phase machine
+│  ├─ grok-call.sh      clean headless Grok wrapper (stdout/stderr OS-separated)
+│  ├─ claude-call.sh    clean headless Claude wrapper (+ cost telemetry)
+│  ├─ codex-call.sh     Codex 3rd vendor (real -s sandbox on Linux, -o clean result)
+│  ├─ local-call.sh     zero-quota Ollama scout
+│  ├─ eval-harness.sh   pass@k / pass^k scorer (lossless early-stop)
+│  ├─ import-scan.sh    deterministic invented-package gate
+│  ├─ test-guard.sh     deterministic invariant-7 gate (builder can't edit tests)
+│  ├─ budget-guard.sh   fail BLOCKED before credit exhaustion
+│  └─ decorrelation.sh  cross-vendor moat telemetry
+├─ tests/               🧪 offline bats suite (guards, gate invariants, adapters, harness)
+├─ harness/             🧠 the MAIN HARNESS layer (see below)
+└─ powershell/          🪟 the original, live-verified Windows PS-5.1 variant
+```
+
+## 🧠 Main Harness (operating layer)
+
+The `harness/` directory is the always-on operating contract for every agent working here — installable into `~/.claude` (`harness/install.sh`, dry-run by default) and mirrored to Grok/Codex via `AGENTS.md`:
+
+| Piece | What it is |
+|---|---|
+| `CONTRACT.md` | prime directives + operations rules (fail closed, eval decides, verify before done) |
+| `REFLEXES.md` | 15 stimulus→response rules that fire before reasoning |
+| `MUSCLE-MEMORY.md` | **33 earned lessons** (⚡-marked ones were paid for live in this repo) |
+| `PATTERNS.md` | proven orchestration / guard / code / testing shapes |
+| `operations/` | `permissions.json` (allow/ask/deny) + 3 hooks: **guard-bad-calls** (PreToolUse, fail-closed), **format-and-log** (PostToolUse), **clean-exit** (Stop → shift-note skeleton) |
+| `skills/` | 10 packs: triage-repo · audit-threats · react-a11y · jest-browser · safe-rewrites · readmes-apis · pandas-sql · prs-rebases · project-brief · loop-runner |
+| `teams/` | Claude+Grok+Codex roster, `agents.json` for `claude --agents`, live display via `--forward-subagent-text` |
+| `workflows/` | W1–W6 dynamic workflows (feature/bugfix/refactor/audit/loop/data) + escalation matrix |
+| `automations/` | nightly suite, weekly decorrelation trend, spend report (cron templates) |
+| `prompts/` | fresh-context subagent brief, untrusted-review lenses |
+| `shift-notes/` | append-only cross-session SHIFT-LOG (clean-exit hook auto-skeletons it) |
+| `bin/loop-runner.sh` | bounded loops: done-condition + caps + STALLED detection, JSONL log |
+| `bootstrap.sh` | vetted online bootstrap (download→inspect→run — never `curl \| bash`) |
+
+```bash
+harness/install.sh                          # dry-run: show what would change
+HARNESS_INSTALL_CONFIRM=1 harness/install.sh  # install (settings merged, backup kept)
+claude --agents "$(cat harness/teams/agents.json)" --forward-subagent-text   # team mode
 ```
 
 ---
@@ -149,9 +265,11 @@ This isn't vibes — every core decision is anchored to a source:
 
 ## ⚖️ Honest limitations
 
-- `--sandbox` for Grok is **macOS-only** today; on Windows it's compensated by worktree isolation + `--deny` + least-privilege (not a microVM).
+- `--sandbox` for Grok is **macOS-only** today; compensated by worktree isolation + `--deny` + least-privilege. On Linux, **Codex's `-s read-only|workspace-write` is a real local sandbox** — use `lib/codex-call.sh` where sandboxing matters.
 - The local Ollama scout is for **exploration only** — never the merge-gating review (the moat needs a strong, different-vendor reviewer).
-- Built and tested on **Windows / PowerShell 5.1**; the `.ps1` scripts assume it.
+- **Cross-platform:** Linux is primary; macOS needs Homebrew bash 5 (portable `date`/`sed`/`stat` in `lib/common.sh`); Windows full team path via **Git Bash or WSL** (`powershell/dual-run.ps1` bridge). Classic CRAFT remains in `powershell/*.ps1`. CI runs on **ubuntu + macos**.
+- The deterministic suite (143 bats tests) covers guards, gate invariants and adapter contracts with stubbed CLIs; the *model-quality* of builds is still gated live by `pass^k`, not by unit tests.
+- `ledger/SPEND.jsonl` (budget telemetry) is a plain, unsigned file — the budget guard is a *cost-control convenience*, not a security boundary. By default it lives in-repo, where code running during `--verify` could locate it via `git rev-parse --git-common-dir` and tamper with it; set `DUAL_AGENT_SPEND_FILE=~/.local/state/dual-agent/SPEND.jsonl` (honoured by both writer and guard) to move it outside any git tree.
 
 ---
 

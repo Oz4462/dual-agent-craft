@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "Team work distribution: after PLAN, Claude/Grok/Codex ALL execute work packages. Architect plans AND codes. Path-disjoint packages prevent double-writes.",
+
+  "workers": ["claude", "grok", "codex"],
+  "require_all_workers": true,
+  "min_packages": 3,
+  "architect_also_works": true,
+  "architect_worker": "claude",
+
+  "assignment_policy": {
+    "comment": "Capability-biased assignment with fairness: every available worker gets ≥1 package when package count allows.",
+    "prefer": {
+      "claude": ["tests", "verify", "security", "error_handling", "docs", "contract_edge"],
+      "grok": ["core_impl", "api", "cli", "feature", "happy_path"],
+      "codex": ["sandbox", "filesystem", "shell", "integration", "risky_io"]
+    },
+    "path_hints": {
+      "claude": ["tests/**", "verify/**", "**/test_*", "docs/**", "README.md"],
+      "grok": ["src/**", "app/**", "lib/**", "cmd/**"],
+      "codex": ["scripts/**", "integrations/**", "src/io/**", "src/fs/**"]
+    },
+    "claude_must_get_impl_or_tests": true,
+    "never_assign_tests_to": ["grok", "codex"]
+  },
+
+  "execution": {
+    "mode": "sequential_path_locked",
+    "comment": "Sequential claims keep git simple; packages are path-disjoint so logical parallelism is preserved. Future: parallel worktrees per package.",
+    "branch": "feat/poc",
+    "integrate_strategy": "same_branch_commits",
+    "max_turns_per_package": 30,
+    "stop_on_package_fail": true
+  },
+
+  "decompose": {
+    "sources": ["acceptance_criteria", "interface_bullets", "test_list"],
+    "always_emit_test_package_for_claude": true,
+    "fallback_packages": [
+      {"id": "WP-CORE", "kind": "core_impl", "title": "Core implementation against interface contract"},
+      {"id": "WP-EDGE", "kind": "error_handling", "title": "Edge cases and fail-closed behavior"},
+      {"id": "WP-TESTS", "kind": "tests", "title": "Acceptance tests pinned to criteria"}
+    ]
+  }
+}

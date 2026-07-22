@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bats (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+
+      - name: Install bats (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core
+
+      - name: Bash version
+        run: bash --version
+
+      - name: Syntax check (bash -n)
+        run: |
+          set -e
+          for f in *.sh lib/*.sh tests/run.sh harness/bin/*.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f"
+          done
+
+      - name: Portable helpers smoke (common.sh)
+        run: |
+          set -e
+          # shellcheck source=lib/common.sh
+          source lib/common.sh
+          echo "os=$(dual_os)"
+          echo "utc=$(utc_stamp)"
+          echo "utc_ms=$(utc_stamp_ms)"
+          echo "iso=$(iso_now)"
+          # stamps must be non-empty and look right
+          [[ "$(utc_stamp)" =~ ^[0-9]{8}-[0-9]{6}$ ]]
+          [[ "$(utc_stamp_ms)" =~ ^[0-9]{8}-[0-9]{6}-[0-9]{3}$ ]]
+          # portable sed_i round-trip
+          f=$(mktemp)
+          echo hello >"$f"
+          sed_i 's/hello/world/' "$f"
+          grep -q world "$f"
+          rm -f "$f"
+          # file size
+          echo abcd >"$f"
+          n=$(file_size_bytes "$f")
+          [[ "$n" -ge 4 ]]
+          rm -f "$f"
+
+      - name: ShellCheck (advisory)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -qq shellcheck || true
+          shellcheck -S error *.sh lib/*.sh || true
+
+      - name: dual-run / team dry-run (no vendor CLIs required)
+        run: |
+          set -e
+          ./dual-run.sh --help | head -5
+          ./lib/role-router.sh profiles | head -5
+          ./lib/coordination.sh validate
+          plan=$(mktemp)
+          cat >"$plan" <<'EOF'
+          # PLAN — ci
+          ## 1. Problem
+          ci fixture feature for team dispatch.
+          ## 2. Stack / Constraints
+          - Sprache/Framework: Python 3
+          - Erlaubte Dependencies: stdlib only
+          - Verbote: none
+          ## 3. Interface-Contract
+          function f() -> None
+          ## 4. Akzeptanzkriterien (verifizierbar, binär)
+          - [ ] works
+          - [ ] edge fails closed
+          - [ ] security path ok
+          ## 5. Test-Liste (Claude härtet diese in Schritt F)
+          - happy
+          ## 6. Out of Scope
+          none
+          EOF
+          # unindent the fixture (YAML run block indentation)
+          python3 -c "p=open('$plan').read(); open('$plan','w').write('\n'.join(l[10:] if l.startswith('          ') else l for l in p.splitlines())+'\n')"
+          out=$(mktemp)
+          ./lib/team-dispatch.sh run --plan "$plan" --dry-run --out "$out"
+          python3 -c "import json;w=json.load(open('$out')); assert w['assignment'].get('claude',0)>=1"
+          rm -f "$plan" "$out"
+
+      - name: Run test suite
+        run: tests/run.sh

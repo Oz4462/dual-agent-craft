@@ -99,3 +99,29 @@ prefix, -90% cached input); cheap-mode N1/K3 vs standard N3/K5.
   Verifiziert: amnesisch hier, normale Projekte unveraendert. Hook-Backups `.bak-20260616`.
 - `mcps/<server>/tools/*.json` = Harness-Tool-Search-Cache (KEIN Hook), per `.gitignore`
   draussen. Falls auf Disk: harmlos, kein Bestandteil dieses Workspace.
+
+## Linux/bash-Port + 3. Vendor + Test-Suite (2026-07-21)
+Kompletter Port der Harness auf **bash 5.x (Linux-first)**; die live-verifizierte Windows-
+PS-5.1-Variante liegt UNVERAENDERT in `powershell/` (inkl. `powershell/lib/`). Verifiziert auf
+Linux (bash 5.2, de-Locale -> LC_ALL=C in `lib/common.sh` erzwungen, sonst brechen Float-printf):
+- **49/49 bats-Tests gruen** (`tests/run.sh`; bootstrapt bats-core wenn kein System-bats):
+  Adapter-Contracts (gestubbte CLIs, 0 billed calls), import-scan (Registry via
+  `IMPORT_SCAN_REGISTRY_BASE` gestubbt, offline-deterministisch), eval-harness (always-green,
+  early-stop, flaky 1/4), budget-guard, decorrelation, test-guard, merge-gate (alle 3
+  No-Cut-Invarianten empirisch: disjunkt->Merge, rot->Block, Konflikt->Abort ohne Overwrite).
+- **Neu implementiert** (vorher nur referenziert/behauptet):
+  - `dual-tiebreak.sh` — Invariante 8 (Mikro-Probe: beide Varianten bauen, Eval misst;
+    Ranking pass^k > passes > Wall-Clock; `ledger/TIEBREAK.json`).
+  - `lib/test-guard.sh` — Invariante 7 deterministisch (Builder-Diff-Scan auf Test-/Verify-
+    Dateien, fail-closed; in `dual-merge.sh --test-guard` eingehaengt).
+  - `lib/codex-call.sh` — 3. Vendor OpenAI Codex via `codex exec`: Prompt auf stdin (`-`),
+    sauberes Resultat via `-o` last-message (kein JSONL-Parsing), `--cd` als Workroot,
+    `--skip-git-repo-check` fuer Worktrees, **echte `-s read-only|workspace-write` Sandbox auf
+    Linux** (Grok `--sandbox` = macOS-only) -> natuerlicher Least-Privilege-Reviewer.
+    Flags live gegen `codex exec --help` verifiziert (nicht geraten).
+- **Bugfixes:** import-scan flaggte `__future__` als invented (PyPI-404) und scannte relative
+  Imports (`from . import x`) — beides gefixt + regressionsgetestet. Stdin-Doppel-Redirect-Bug
+  (`python3 - <<'PY' <<<"$var"` — herestring gewinnt, Programm wird zum Input) beim Port
+  entdeckt: Daten via env-var uebergeben, NIE zwei stdin-Redirects.
+- CI: `.github/workflows/ci.yml` (ubuntu, bash -n + shellcheck advisory + Suite).
+- Branch `feat/bash-port`, lokal, NICHT gepusht (Owner-Regel).
