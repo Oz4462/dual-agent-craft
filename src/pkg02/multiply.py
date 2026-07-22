@@ -1,21 +1,25 @@
-"""WP03 — pure stdlib multiply(a, b); zero-product cases (A3).
+"""WP03 core_impl — pure stdlib multiply(a, b).
 
-Acceptance A3: multiply(0, 5) == 0, multiply(7, 0) == 0, multiply(0, 0) == 0.
-stdlib only; no I/O; no side effects; no third-party imports.
+PLAN.md §3 Interface-Contract:
+  multiply(a: int | float, b: int | float) -> int | float
+  - returns arithmetic product a * b
+  - TypeError on non-numeric args (str, None, list, bool, …)
+    Note: str * int is valid Python (string repeat), so non-numbers are
+    rejected explicitly rather than relying only on the * operator.
+  - no side effects, no I/O, no imports (stdlib-only package; typing optional)
+
+Owned by package WP03 under src/pkg02/. Root multiply.py is wired by INTEGRATE.
+Acceptance A3: unittest discover exits 0 with ≥3 tests (this impl must satisfy
+the contract cases the tests pin: happy path, zeros, negatives).
 """
 
 
-def multiply(a, b):
-    """Return the arithmetic product a * b.
+def multiply(a: int | float, b: int | float) -> int | float:
+    """Return the arithmetic product of a and b.
 
-    Accepts int or float only (bool is rejected). int*int yields int;
-    otherwise float (standard Python ``*`` semantics). Raises TypeError
-    when either argument is not exactly int or float.
-
-    Zero cases (A3):
-      multiply(0, 5) == 0
-      multiply(7, 0) == 0
-      multiply(0, 0) == 0
+    Accepts int or float only (bool is rejected even though it subclasses int).
+    int*int yields int; otherwise float (standard Python ``*`` semantics).
+    Non-numeric arguments raise TypeError.
     """
     if type(a) is not int and type(a) is not float:
         raise TypeError(
