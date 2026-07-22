@@ -3,7 +3,7 @@
 Contract (PLAN.md §3-§5):
 - multiply(a: int | float, b: int | float) -> int | float
 - happy path: multiply(2, 3) == 6
-- null cases: multiply(0, 5) == 0, multiply(7, 0) == 0, multiply(0, 0) == 0
+- null cases: multiply(0, 5) == 0, multiply(5, 0) == 0, multiply(0, 0) == 0
 - negative numbers: multiply(-2, 3) == -6, multiply(-2, -3) == 6
 
 Pure stdlib (unittest), no third-party deps, no I/O beyond imports. The
@@ -68,6 +68,11 @@ class MultiplyContractTest(unittest.TestCase):
         for name, multiply in self.implementations:
             with self.subTest(implementation=name):
                 self.assertEqual(multiply(0, 5), 0)
+
+    def test_null_case_five_times_zero_is_zero(self):
+        for name, multiply in self.implementations:
+            with self.subTest(implementation=name):
+                self.assertEqual(multiply(5, 0), 0)
 
     def test_null_case_seven_times_zero_is_zero(self):
         for name, multiply in self.implementations:
