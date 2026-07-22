@@ -1,7 +1,8 @@
-"""WP05 — pure stdlib multiply(a, b); no third-party or network deps.
+"""WP05 — pure stdlib multiply(a, b); no network or process APIs (A5).
 
-Acceptance A5: no import statements beyond optional typing constructs.
-No I/O, no side effects, no environment access.
+Acceptance A5: implementation must not use network clients, HTTP stacks,
+process spawning, or environment-variable access. stdlib only; no I/O;
+no side effects; no third-party imports.
 """
 
 
