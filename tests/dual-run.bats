@@ -166,6 +166,42 @@ EOF
   [[ "$output" == *team-work=ON* ]] || [[ "$output" == *"Team Work"* ]] || [[ "$output" == *claude* ]]
 }
 
+@test "fortify dispatch includes --skip-permissions (headless Write fix)" {
+  # Static contract: hardener must not reintroduce read-only claude-call.
+  grep -q -- '--skip-permissions' "$HARNESS_ROOT/dual-run.sh"
+  # Ensure fortify tag and skip-permissions appear near dual-run-fortify call
+  awk '/dual-run-fortify/{for(i=0;i<6;i++){getline; print}}' "$HARNESS_ROOT/dual-run.sh" \
+    | grep -q -- '--skip-permissions'
+}
+
+@test "fortify path: claude invoked with dangerously-skip-permissions (fake CLI)" {
+  # Minimal path: C skip (filled PLAN), no team-work, skip guards noise, fortify on, skip merge.
+  # Fake CLIs: grok builds POC; claude for review JSON + fortify records argv.
+  mk_grok
+  cat >"$FAKEBIN/claude" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$SCRATCH/claude.argv"
+# If fortify (writes files when --dangerously-skip-permissions present)
+if printf '%s' "\$*" | grep -q -- '--dangerously-skip-permissions'; then
+  mkdir -p src tests 2>/dev/null || true
+  # worktree cwd may vary; write a marker file
+  echo "hardened" > fortify.marker
+fi
+# Assess path needs issues JSON in result text
+echo '{"type":"result","result":"{\"issues\":[]}","is_error":false,"session_id":"t","total_cost_usd":0.01}'
+exit 0
+EOF
+  chmod +x "$FAKEBIN/claude"
+  # codex not needed if assess is claude
+  run drun --verify true --skip-merge --fortify --no-team-work --no-import-scan \
+    --no-adaptive --variants 1 --builder grok --assess-vendor claude
+  echo "$output" >&2
+  [ "$status" -eq 0 ]
+  # At least one claude invocation recorded skip-permissions flag
+  grep -q -- '--dangerously-skip-permissions' "$SCRATCH/claude.argv" \
+    || grep -q -- 'dangerously-skip-permissions' "$SCRATCH/claude.argv"
+}
+
 @test "bad --from-phase is rejected" {
   run drun --from-phase Z --verify true
   [ "$status" -ne 0 ]

@@ -458,10 +458,49 @@ if should_run_phase G; then
   fi
 
   # Ownership audit: builder must not touch Claude/harness surfaces (anti-overlap).
+  # Team-work: Claude-owned package paths (tests/integrate) are allowed; harness
+  # orchestration surfaces are exempt (see coordination.json orchestration_exempt).
   if git rev-parse --verify "$POC_BRANCH" >/dev/null 2>&1; then
     mapfile -t poc_files < <(git diff --name-only "$BASE_BRANCH...$POC_BRANCH" 2>/dev/null || true)
     if [[ ${#poc_files[@]} -gt 0 ]]; then
-      coordination_check_builder_paths "${poc_files[@]}"
+      if [[ "$TEAM_WORK" == true && -f "$_HERE/ledger/WORK.json" ]]; then
+        # Filter to product paths only for never-list check; Claude package paths allowed.
+        mapfile -t check_files < <(
+          WORK="$_HERE/ledger/WORK.json" python3 - "${poc_files[@]}" <<'PY'
+import json, os, sys
+work = json.load(open(os.environ["WORK"], encoding="utf-8"))
+claude_prefixes = []
+for p in work.get("packages") or []:
+    if p.get("assignee") not in ("claude", "architect"):
+        continue
+    for path in p.get("paths") or []:
+        path = str(path).strip().lstrip("./")
+        if not path:
+            continue
+        claude_prefixes.append(path if path.endswith("/") or path.endswith(".py") else path + "/")
+
+def claude_owns(rel: str) -> bool:
+    rel = rel.lstrip("./")
+    for p in claude_prefixes:
+        if p.endswith(".py"):
+            if rel == p:
+                return True
+        elif rel == p.rstrip("/") or rel.startswith(p):
+            return True
+    return False
+
+for f in sys.argv[1:]:
+    if not f or claude_owns(f):
+        continue
+    print(f)
+PY
+        )
+        if [[ ${#check_files[@]} -gt 0 ]]; then
+          coordination_check_builder_paths "${check_files[@]}"
+        fi
+      else
+        coordination_check_builder_paths "${poc_files[@]}"
+      fi
     fi
   fi
 
@@ -544,8 +583,12 @@ without checking."
     fi
     cat >"$fprompt" <<EOF
 You are the HARDENER in a dual-agent workflow. The BUILDER already produced a POC on this
-branch. Harden it: add/fix tests, error handling, security, docs — without changing the
-contract. Do NOT invent dependencies outside PLAN. Commit your work.
+branch. You HAVE write permissions (Write/Edit/Bash) — apply fixes in the working tree.
+
+Harden it: add/fix tests, error handling, security, docs — without changing the
+contract. Apply conceded REVIEW fixes. Do NOT invent dependencies outside PLAN.
+Write real files under this worktree. The harness will commit after you finish.
+Do NOT claim you are read-only; if a tool denies a write, retry with another approach.
 $sec_block
 
 === CONTRACT ===
@@ -556,11 +599,14 @@ $review_snip
 EOF
     # Claude operates in the harden worktree cwd (claude-call has no --cwd flag).
     # Absolute prompt path so the wrapper finds it after cd.
+    # Live finding: without --skip-permissions, headless fortify is read-only → empty harden.
     fprompt_abs="$(cd "$(dirname "$fprompt")" && pwd)/$(basename "$fprompt")"
     (
       cd "$wt" || exit 1
       "$_HERE/lib/claude-call.sh" --prompt-file "$fprompt_abs" \
         --tag dual-run-fortify \
+        --skip-permissions \
+        --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
         ${MODEL:+--model "$MODEL"}
     ) || { git worktree remove --force "$wt" >/dev/null 2>&1 || true; fail "fortify claude-call failed."; }
 
