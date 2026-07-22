@@ -20,50 +20,69 @@ jobs:
         with:
           python-version: "3.12"
 
+      # macOS ships /bin/bash 3.2 which cannot parse our scripts (mapfile, heredoc
+      # inside process substitution). Install bash 5 and put it first on PATH.
+      - name: Install Bash 5 + bats (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          brew install bash bats-core
+          BREW_PREFIX="$(brew --prefix)"
+          echo "${BREW_PREFIX}/bin" >> "$GITHUB_PATH"
+          echo "BASH5=${BREW_PREFIX}/bin/bash" >> "$GITHUB_ENV"
+          "${BREW_PREFIX}/bin/bash" --version
+
       - name: Install bats (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats
+          echo "BASH5=/bin/bash" >> "$GITHUB_ENV"
 
-      - name: Install bats (macOS)
-        if: runner.os == 'macOS'
-        run: brew install bats-core
-
-      - name: Bash version
-        run: bash --version
+      - name: Bash version (must be 4+)
+        run: |
+          set -e
+          BASH="${BASH5:-bash}"
+          echo "Using: $BASH"
+          "$BASH" --version
+          ver=$("$BASH" -c 'echo ${BASH_VERSINFO[0]}')
+          test "$ver" -ge 4
 
       - name: Syntax check (bash -n)
         run: |
           set -e
+          BASH="${BASH5:-bash}"
           for f in *.sh lib/*.sh tests/run.sh harness/bin/*.sh; do
             [ -f "$f" ] || continue
-            bash -n "$f"
+            echo "bash -n $f"
+            "$BASH" -n "$f"
           done
 
       - name: Portable helpers smoke (common.sh)
         run: |
           set -e
-          # shellcheck source=lib/common.sh
-          source lib/common.sh
-          echo "os=$(dual_os)"
-          echo "utc=$(utc_stamp)"
-          echo "utc_ms=$(utc_stamp_ms)"
-          echo "iso=$(iso_now)"
-          # stamps must be non-empty and look right
-          [[ "$(utc_stamp)" =~ ^[0-9]{8}-[0-9]{6}$ ]]
-          [[ "$(utc_stamp_ms)" =~ ^[0-9]{8}-[0-9]{6}-[0-9]{3}$ ]]
-          # portable sed_i round-trip
-          f=$(mktemp)
-          echo hello >"$f"
-          sed_i 's/hello/world/' "$f"
-          grep -q world "$f"
-          rm -f "$f"
-          # file size
-          echo abcd >"$f"
-          n=$(file_size_bytes "$f")
-          [[ "$n" -ge 4 ]]
-          rm -f "$f"
+          BASH="${BASH5:-bash}"
+          "$BASH" -c '
+            set -e
+            source lib/common.sh
+            echo "os=$(dual_os)"
+            echo "utc=$(utc_stamp)"
+            echo "utc_ms=$(utc_stamp_ms)"
+            echo "iso=$(iso_now)"
+            [[ "$(utc_stamp)" =~ ^[0-9]{8}-[0-9]{6}$ ]]
+            [[ "$(utc_stamp_ms)" =~ ^[0-9]{8}-[0-9]{6}-[0-9]{3}$ ]]
+            f=$(mktemp)
+            echo hello >"$f"
+            sed_i "s/hello/world/" "$f"
+            grep -q world "$f"
+            echo abcd >"$f"
+            n=$(file_size_bytes "$f")
+            [[ "$n" -ge 4 ]]
+            rm -f "$f"
+          '
 
-      - name: ShellCheck (advisory)
+      - name: ShellCheck (advisory, Linux only)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y -qq shellcheck || true
@@ -72,9 +91,10 @@ jobs:
       - name: dual-run / team dry-run (no vendor CLIs required)
         run: |
           set -e
-          ./dual-run.sh --help | head -5
-          ./lib/role-router.sh profiles | head -5
-          ./lib/coordination.sh validate
+          BASH="${BASH5:-bash}"
+          "$BASH" ./dual-run.sh --help | head -5
+          "$BASH" ./lib/role-router.sh profiles | head -5
+          "$BASH" ./lib/coordination.sh validate
           plan=$(mktemp)
           cat >"$plan" <<'EOF'
           # PLAN — ci
@@ -95,12 +115,21 @@ jobs:
           ## 6. Out of Scope
           none
           EOF
-          # unindent the fixture (YAML run block indentation)
-          python3 -c "p=open('$plan').read(); open('$plan','w').write('\n'.join(l[10:] if l.startswith('          ') else l for l in p.splitlines())+'\n')"
+          python3 -c "
+          p=open('$plan').read()
+          open('$plan','w').write('\n'.join(l[10:] if l.startswith('          ') else l for l in p.splitlines())+'\n')
+          "
           out=$(mktemp)
-          ./lib/team-dispatch.sh run --plan "$plan" --dry-run --out "$out"
+          "$BASH" ./lib/team-dispatch.sh run --plan "$plan" --dry-run --out "$out"
           python3 -c "import json;w=json.load(open('$out')); assert w['assignment'].get('claude',0)>=1"
           rm -f "$plan" "$out"
 
       - name: Run test suite
-        run: tests/run.sh
+        run: |
+          set -e
+          BASH="${BASH5:-bash}"
+          # tests/run.sh uses env bash via shebang; force PATH so bats children see bash 5
+          if [ -n "${BASH5:-}" ]; then
+            export PATH="$(dirname "$BASH5"):$PATH"
+          fi
+          "$BASH" tests/run.sh
