@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dual-Craft · Chat Cockpit</title>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div class="brand-text">
+          <strong>Dual-Craft</strong>
+          <span>Chat Cockpit</span>
+        </div>
+      </div>
+      <div class="topbar-meta" id="topMeta">
+        <span class="pill" id="pillBranch">branch —</span>
+        <span class="pill" id="pillLock">lock free</span>
+        <span class="pill" id="pillRun">idle</span>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="btn ghost" id="btnRefresh" title="Refresh status">Refresh</button>
+        <button type="button" class="btn ghost" id="btnClear" title="Clear chat history">Clear</button>
+        <a class="btn ghost" href="/api/status" target="_blank" rel="noopener">API</a>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Left: sessions / presets -->
+      <aside class="rail left">
+        <div class="rail-head">
+          <h2>Mission</h2>
+          <p class="muted">Describe work like a chat. The orchestrator routes Claude · Grok · Codex.</p>
+        </div>
+        <div class="presets" id="presets">
+          <button type="button" class="preset" data-task="Add a health endpoint that returns {status:'ok'} with a unit test.">Health endpoint + test</button>
+          <button type="button" class="preset" data-task="Build a small CLI calculator with add and div; fail closed on divide-by-zero; include tests.">CLI calculator</button>
+          <button type="button" class="preset" data-task="Add OAuth JWT authentication middleware with secure defaults and tests.">OAuth / JWT (security profile)</button>
+          <button type="button" class="preset" data-task="Tiny spike: hello world module, minimal scope.">Minimal spike</button>
+        </div>
+        <div class="rail-section">
+          <h3>CLI presence</h3>
+          <ul class="cli-list" id="cliList"></ul>
+        </div>
+        <div class="rail-section">
+          <h3>Ledger</h3>
+          <ul class="ledger-list" id="ledgerList"></ul>
+        </div>
+      </aside>
+
+      <!-- Center: chat -->
+      <section class="chat-panel">
+        <div class="chat-scroll" id="chatScroll" role="log" aria-live="polite"></div>
+
+        <div class="composer">
+          <div class="composer-toolbar">
+            <label class="field">
+              <span>Profile</span>
+              <select id="optProfile">
+                <option value="auto">auto</option>
+                <option value="minimal">minimal</option>
+                <option value="standard" selected>standard</option>
+                <option value="thorough">thorough</option>
+                <option value="security">security</option>
+                <option value="sandbox">sandbox</option>
+              </select>
+            </label>
+            <label class="field grow">
+              <span>Verify</span>
+              <input id="optVerify" type="text" value="true" spellcheck="false" />
+            </label>
+            <label class="check"><input type="checkbox" id="optAutoPlan" checked /> auto-plan</label>
+            <label class="check"><input type="checkbox" id="optTeamWork" checked /> team-work</label>
+            <label class="check"><input type="checkbox" id="optSkipMerge" checked /> skip-merge</label>
+            <label class="check"><input type="checkbox" id="optDryRun" /> dry-run</label>
+            <label class="check"><input type="checkbox" id="optFortify" /> fortify</label>
+          </div>
+          <div class="composer-row">
+            <textarea id="input" rows="3" placeholder="Describe the task in plain language… e.g. Build a CLI that converts JSON to CSV with tests."></textarea>
+            <div class="composer-actions">
+              <button type="button" class="btn secondary" id="btnPreview">Preview who</button>
+              <button type="button" class="btn primary" id="btnSend">Run task</button>
+              <button type="button" class="btn danger" id="btnCancel" disabled>Cancel</button>
+            </div>
+          </div>
+          <p class="composer-hint muted">Local only (127.0.0.1). Uses your Claude / Grok / Codex CLI logins — no API keys in the UI.</p>
+        </div>
+      </section>
+
+      <!-- Right: mission control -->
+      <aside class="rail right">
+        <div class="rail-head">
+          <h2>Mission control</h2>
+          <p class="muted" id="whoProfile">profile —</p>
+        </div>
+        <div class="phase-track" id="phaseTrack"></div>
+        <div class="rail-section">
+          <h3>Who-matrix</h3>
+          <div class="who-table" id="whoTable"><p class="muted">Send a task or Preview who.</p></div>
+        </div>
+        <div class="rail-section">
+          <h3>Team packages</h3>
+          <div id="workRoster"><p class="muted">No WORK.json yet.</p></div>
+        </div>
+        <div class="rail-section grow">
+          <div class="rail-head-inline">
+            <h3>Live log</h3>
+            <span class="muted" id="logMeta">idle</span>
+          </div>
+          <pre class="log" id="liveLog"></pre>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

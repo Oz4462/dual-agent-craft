@@ -5,6 +5,7 @@
 .dual-agent/run-state.json
 .dual-agent/dual-run.lock
 .dual-agent/*.lock
+.dual-agent/chat/
 ledger/*
 !ledger/.gitkeep
 *.tmp

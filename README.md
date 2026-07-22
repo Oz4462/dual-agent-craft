@@ -113,6 +113,29 @@ Every guard is **deterministic** where possible (nothing that can itself halluci
 
 ---
 
+## 💬 Chat Task UI (professional)
+
+Talk to the harness like a chat — not only raw CLI:
+
+```bash
+./dual-chat.sh
+# → http://127.0.0.1:8787/
+```
+
+| Panel | What you get |
+|---|---|
+| **Chat** | Plain-language tasks, history, orchestrator replies |
+| **Preview who** | Adaptive who-matrix (no run) |
+| **Run task** | Starts `dual-run.sh` with live SSE logs |
+| **Mission control** | Phases C–T, team packages, CLI presence, ledger |
+
+Options in the composer: profile · verify · auto-plan · team-work · skip-merge · dry-run · fortify.  
+Localhost-only; uses your installed Claude/Grok/Codex CLIs. Details: [`ui/README.md`](./ui/README.md).
+
+The older **`dashboard.html`** remains a read-only status snapshot (`./dual-dashboard.sh`).
+
+---
+
 ## 🖥️ Platforms (Linux · macOS · Windows)
 
 | | Linux | macOS | Windows |
@@ -158,7 +181,8 @@ cp PLAN.template.md PLAN.md    # fill contract — or use --auto-plan --task "�
 ./dual-run.sh --dry-run --verify true --skip-merge # phase plan only
 ./dual-run.sh --profile security --verify "…"      # force profile
 ./dual-run.sh --no-team-work --verify "…"          # old mono-builder R path
-./dual-dashboard.sh && xdg-open dashboard.html     # HTML cockpit
+./dual-dashboard.sh && xdg-open dashboard.html     # static HTML status cockpit
+./dual-chat.sh                                     # professional Chat Task UI (localhost)
 ./dual-status.sh                                   # doctor
 ```
 
@@ -224,7 +248,9 @@ dual-agent-craft/
 ├─ dual-merge.sh          # No-Cut + pass^k
 ├─ dual-tiebreak.sh       # invariant-8 micro-probe
 ├─ dual-status.sh         # doctor
-├─ dual-dashboard.sh      # → dashboard.html
+├─ dual-dashboard.sh      # → dashboard.html (status snapshot)
+├─ dual-chat.sh           # 💬 professional Chat Task UI → dual-run
+├─ ui/                    # Chat cockpit (server + static SPA)
 ├─ dual-view.sh           # tmux cockpit
 ├─ lib/
 │  ├─ common.sh           # portable helpers (Linux/macOS/Git Bash)

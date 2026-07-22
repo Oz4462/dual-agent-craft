@@ -98,7 +98,8 @@ Team-work (`team-dispatch`, adaptive roles) is implemented in **bash**; use Opti
 |---|---|---|
 | Doctor | `./dual-status.sh` | `.\powershell\dual-run.ps1 --status` or Git Bash `./dual-status.sh` |
 | Full team loop | `./dual-run.sh` | `.\powershell\dual-run.ps1` → bash |
-| Dashboard | `./dual-dashboard.sh` | same via bash, open `dashboard.html` |
+| Dashboard (status HTML) | `./dual-dashboard.sh` | same via bash, open `dashboard.html` |
+| **Chat Task UI** | `./dual-chat.sh` → http://127.0.0.1:8787/ | Git Bash / WSL: `bash dual-chat.sh` |
 | Split cockpit | `./dual-view.sh` (tmux) | `.\powershell\dual-view.ps1` (wt) |
 
 ## Design rules we follow for portability
