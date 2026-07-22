@@ -24,7 +24,8 @@ _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$_HERE/common.sh"
 
-PROMPT_FILE=""; MODEL=""; SYSTEM_PROMPT=""; MAX_BUDGET="0"; TAG="claude"; DISALLOWED_TOOLS=""
+PROMPT_FILE=""; MODEL=""; SYSTEM_PROMPT=""; MAX_BUDGET="0"; TAG="claude"
+DISALLOWED_TOOLS=""; ALLOWED_TOOLS=""; SKIP_PERMISSIONS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prompt-file)      PROMPT_FILE="${2:?value required for $1}"; shift 2;;
@@ -32,6 +33,9 @@ while [[ $# -gt 0 ]]; do
     --system-prompt)    SYSTEM_PROMPT="${2:?value required for $1}"; shift 2;;
     --max-budget-usd)   MAX_BUDGET="${2:?value required for $1}"; shift 2;;
     --disallowed-tools) DISALLOWED_TOOLS="${2:?value required for $1}"; shift 2;;  # least-privilege for tool-free roles (ASSESS)
+    --allowed-tools)    ALLOWED_TOOLS="${2:?value required for $1}"; shift 2;;
+    # Worker mode (team-dispatch): headless Write/Edit must not hang on permission prompts.
+    --skip-permissions|--dangerously-skip-permissions) SKIP_PERMISSIONS=true; shift;;
     --tag)              TAG="${2:?value required for $1}"; shift 2;;
     *) fail "claude-call: unknown arg '$1'";;
   esac
@@ -48,6 +52,8 @@ args=(-p --output-format json --exclude-dynamic-system-prompt-sections)
 [[ -n "$MODEL" ]] && args+=(--model "$MODEL")
 [[ -n "$SYSTEM_PROMPT" ]] && args+=(--append-system-prompt "$SYSTEM_PROMPT")
 [[ -n "$DISALLOWED_TOOLS" ]] && args+=(--disallowed-tools "$DISALLOWED_TOOLS")
+[[ -n "$ALLOWED_TOOLS" ]] && args+=(--allowed-tools "$ALLOWED_TOOLS")
+[[ "$SKIP_PERMISSIONS" == true ]] && args+=(--dangerously-skip-permissions)
 awk -v b="$MAX_BUDGET" 'BEGIN{exit !(b>0)}' && args+=(--max-budget-usd "$MAX_BUDGET")
 
 # Prompt on stdin; stdout -> result file, stderr -> err log.

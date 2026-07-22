@@ -533,10 +533,13 @@ EOF
           >/dev/null || rc=$?
         ;;
       claude)
-        # Claude as worker: may use Write/Edit (not assess-only disallowed)
+        # Claude as worker: Write/Edit must work headless (no interactive permission prompts).
+        # Without --skip-permissions, headless -p sessions deny every write → empty package fail-closed.
         (
           cd "$root" || exit 1
-          "$_HERE/claude-call.sh" --prompt-file "$pf" --tag "team-$id-claude"
+          "$_HERE/claude-call.sh" --prompt-file "$pf" --tag "team-$id-claude" \
+            --skip-permissions \
+            --allowed-tools "Read,Write,Edit,Bash,Glob,Grep"
         ) >/dev/null || rc=$?
         ;;
       *) fail "unknown worker $assignee";;
