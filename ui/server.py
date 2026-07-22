@@ -50,12 +50,42 @@ def iso_stamp() -> str:
 # ---------------------------------------------------------------------------
 
 
+STATUS_DE = {
+    "queued": "wartend",
+    "running": "läuft",
+    "succeeded": "erfolgreich",
+    "failed": "fehlgeschlagen",
+    "cancelled": "abgebrochen",
+}
+
+
+def mode_summary_de(mode: dict) -> str:
+    """German, human-readable summary of what a run will/won't do."""
+    parts: list[str] = []
+    if mode.get("dry_run"):
+        parts.append("**Dry-Run** — keine echten Schreibzugriffe, keine Vendor-Aufrufe, Pakete werden nur `dry-ok` markiert")
+    else:
+        parts.append("**Echte Ausführung** — Worker schreiben Dateien; der Harness committet lokal (`[no-push]`)")
+    if mode.get("skip_merge"):
+        parts.append("**Merge übersprungen** — Ergebnis bleibt auf dem Arbeits-Branch, `main` wird NICHT verändert")
+    else:
+        parts.append("**Merge aktiv** — bei grünem Gate wird nach `main` gemerged")
+    if mode.get("team_work"):
+        parts.append("**Team-Arbeit an** — Phase W verteilt Pakete an Claude, Grok und Codex")
+    else:
+        parts.append("**Solo-Modus** — keine Team-Phase W")
+    if mode.get("fortify"):
+        parts.append("**Härten aktiv** — zusätzlicher Fortify-Pass")
+    return "\n".join(f"- {p}" for p in parts)
+
+
 class RunState:
-    def __init__(self, run_id: str, task: str, argv: list[str], cwd: Path):
+    def __init__(self, run_id: str, task: str, argv: list[str], cwd: Path, mode: Optional[dict] = None):
         self.id = run_id
         self.task = task
         self.argv = argv
         self.cwd = cwd
+        self.mode = mode or {}
         self.status = "queued"  # queued|running|succeeded|failed|cancelled
         self.started_at = utc_now()
         self.finished_at: Optional[str] = None
@@ -90,6 +120,7 @@ class RunState:
                 "exit_code": self.exit_code,
                 "line_count": len(self.lines),
                 "tail": self.lines[-80:],
+                "mode": self.mode,
             }
 
 
@@ -262,6 +293,75 @@ class App:
         data["_exit"] = code
         return data
 
+    # --- persistence check ----------------------------------------------------
+    def persistence_check(self) -> dict[str, Any]:
+        """Wurde wirklich gespeichert? Vergleicht WORK.json-Status mit git-Realität.
+
+        Lücke, die hier sichtbar wird: ein Paket kann "done" sein, obwohl der
+        Worker-CLI mit exit 0 beendet hat OHNE Dateien zu schreiben — dann gibt
+        es weder einen team-Commit noch geänderte Dateien unter seinen Pfaden.
+        """
+        dirty: list[str] = []
+        try:
+            out = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=str(self.root), text=True
+            )
+            dirty = [ln[3:].strip() for ln in out.splitlines() if ln.strip()]
+        except Exception:
+            pass
+
+        team_commits: list[dict[str, str]] = []
+        try:
+            out = subprocess.check_output(
+                ["git", "log", "-25", "--pretty=%h\t%s"], cwd=str(self.root), text=True
+            )
+            for ln in out.splitlines():
+                h, _, subject = ln.partition("\t")
+                if subject.startswith("team("):
+                    team_commits.append({"hash": h, "subject": subject})
+        except Exception:
+            pass
+
+        work = self._read_json(self.root / "ledger" / "WORK.json") or {}
+        packages: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        for p in work.get("packages") or []:
+            pid = str(p.get("id") or "")
+            status = str(p.get("status") or "")
+            paths = [str(x) for x in (p.get("paths") or [])]
+            commit = next((c for c in team_commits if pid and pid in c["subject"]), None)
+            touched = [d for d in dirty if any(d.startswith(pfx) for pfx in paths)]
+            entry = {
+                "id": pid,
+                "status": status,
+                "assignee": p.get("assignee"),
+                "paths": paths,
+                "commit": commit,
+                "dirty_touched": touched,
+            }
+            if status == "done" and not commit and not touched:
+                entry["persisted"] = False
+                warnings.append(
+                    f"Paket {pid} ist „done“, aber es gibt weder einen team-Commit "
+                    f"noch geänderte Dateien unter {', '.join(paths) or '—'} — "
+                    f"möglicherweise wurde nichts gespeichert (Worker-CLI exit 0 ohne Writes)."
+                )
+            elif status == "dry-ok":
+                entry["persisted"] = None  # Dry-Run: nichts zu erwarten
+            else:
+                entry["persisted"] = bool(commit or touched) if status == "done" else None
+            packages.append(entry)
+
+        return {
+            "ok": not warnings,
+            "stamp": utc_now(),
+            "dirty_count": len(dirty),
+            "dirty_files": dirty[:50],
+            "team_commits": team_commits[:10],
+            "packages": packages,
+            "warnings": warnings,
+        }
+
     # --- runs ---------------------------------------------------------------
     def start_run(
         self,
@@ -279,7 +379,7 @@ class App:
             if self.active_run_id and self.runs.get(self.active_run_id):
                 cur = self.runs[self.active_run_id]
                 if cur.status in ("queued", "running"):
-                    raise RuntimeError(f"run already active: {cur.id} ({cur.status})")
+                    raise RuntimeError(f"Es läuft bereits ein Lauf: {cur.id} ({STATUS_DE.get(cur.status, cur.status)})")
 
             run_id = f"run-{iso_stamp()}-{uuid.uuid4().hex[:6]}"
             dual_run = self.root / "dual-run.sh"
@@ -301,7 +401,16 @@ class App:
             if fortify:
                 argv.append("--fortify")
 
-            rs = RunState(run_id, task.strip(), argv, self.root)
+            mode = {
+                "profile": profile,
+                "verify": verify,
+                "dry_run": dry_run,
+                "auto_plan": auto_plan,
+                "skip_merge": skip_merge,
+                "team_work": team_work,
+                "fortify": fortify,
+            }
+            rs = RunState(run_id, task.strip(), argv, self.root, mode=mode)
             self.runs[run_id] = rs
             self.active_run_id = run_id
 
@@ -337,18 +446,42 @@ class App:
             finally:
                 rs.finished_at = utc_now()
                 rs.proc = None
-                # system chat message
+                # system chat message (deutsch) + Persistenz-Check
+                status_de = STATUS_DE.get(rs.status, rs.status)
                 self.append_history(
                     "system",
-                    f"Run {run_id} finished: **{rs.status}** (exit={rs.exit_code}).",
+                    f"Lauf `{run_id}` beendet: **{status_de}** (Exit {rs.exit_code}).",
                     {"run_id": run_id, "status": rs.status, "exit_code": rs.exit_code},
                 )
+                try:
+                    if rs.mode.get("team_work") and not rs.mode.get("dry_run"):
+                        pc = self.persistence_check()
+                        if pc["warnings"]:
+                            body_lines = ["**Persistenz-Check: WARNUNG**", ""]
+                            body_lines += [f"- ⚠️ {w}" for w in pc["warnings"]]
+                            body_lines += [
+                                "",
+                                "Details im Panel „Persistenz-Check“ (Mission-Leiste).",
+                            ]
+                        else:
+                            done_n = sum(1 for p in pc["packages"] if p.get("status") == "done")
+                            body_lines = [
+                                f"**Persistenz-Check: OK** — {done_n} erledigte(s) Paket(e), "
+                                f"{len(pc['team_commits'])} team-Commit(s), "
+                                f"{pc['dirty_count']} uncommittete Datei(en)."
+                            ]
+                        self.append_history(
+                            "system", "\n".join(body_lines), {"kind": "persistence", "data": pc}
+                        )
+                except Exception:
+                    pass
 
         threading.Thread(target=worker, name=f"dual-run-{run_id}", daemon=True).start()
         self.append_history(
             "assistant",
-            f"Started dual-run `{run_id}`.\n\n```\n{' '.join(argv)}\n```\n\nStreaming logs…",
-            {"run_id": run_id, "kind": "run_started"},
+            f"Lauf `{run_id}` gestartet.\n\n```\n{' '.join(argv)}\n```\n\n"
+            f"**Modus:**\n{mode_summary_de(rs.mode)}\n\nLive-Log läuft…",
+            {"run_id": run_id, "kind": "run_started", "mode": rs.mode},
         )
         return rs
 
@@ -422,6 +555,9 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/status":
             return self._json(200, APP.status())
 
+        if path == "/api/persistence":
+            return self._json(200, APP.persistence_check())
+
         if path == "/api/history":
             qs = parse_qs(parsed.query)
             limit = int((qs.get("limit") or ["200"])[0])
@@ -459,7 +595,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         if path == "/api/history/clear":
             APP.clear_history()
-            APP.append_history("system", "History cleared.", {"kind": "history_clear"})
+            APP.append_history("system", "Verlauf geleert.", {"kind": "history_clear"})
             return self._json(200, {"ok": True})
 
         if path == "/api/chat":
@@ -477,10 +613,10 @@ class Handler(SimpleHTTPRequestHandler):
             who = APP.who(text, profile)
             profile_name = who.get("profile") or profile
             matrix = who.get("who_matrix") or []
-            lines = [f"**Task received.** Adaptive profile: `{profile_name}`."]
+            lines = [f"**Aufgabe erhalten.** Adaptives Profil: `{profile_name}`."]
             if matrix:
                 lines.append("")
-                lines.append("| Phase | Function | Agent |")
+                lines.append("| Phase | Funktion | Agent |")
                 lines.append("|---|---|---|")
                 for row in matrix:
                     lines.append(
@@ -488,7 +624,10 @@ class Handler(SimpleHTTPRequestHandler):
                     )
             lines.append("")
             if body.get("preview_only"):
-                lines.append("Preview only — not starting a run. Send again with **Run** to execute.")
+                lines.append(
+                    "**Nur Vorschau** — es wird kein Lauf gestartet und **nichts gespeichert**. "
+                    "Zum Ausführen mit **Starten** senden."
+                )
                 asst = APP.append_history("assistant", "\n".join(lines), {"kind": "preview", "who": who})
                 return self._json(200, {"user": user_msg, "assistant": asst, "who": who, "run": None})
 
@@ -505,10 +644,10 @@ class Handler(SimpleHTTPRequestHandler):
                     fortify=bool(body.get("fortify", False)),
                 )
             except RuntimeError as e:
-                asst = APP.append_history("assistant", f"**Blocked:** {e}", {"kind": "error"})
+                asst = APP.append_history("assistant", f"**Blockiert:** {e}", {"kind": "error"})
                 return self._json(409, {"error": str(e), "user": user_msg, "assistant": asst})
 
-            lines.append(f"Starting dual-run `{rs.id}`…")
+            lines.append(f"Starte Lauf `{rs.id}`…")
             asst = APP.append_history(
                 "assistant",
                 "\n".join(lines),
@@ -653,21 +792,31 @@ def main() -> int:
     if not APP.load_history(1):
         APP.append_history(
             "system",
-            "Welcome to the **Dual-Craft Chat Cockpit**. Describe a task in plain language — "
-            "I will route it through Claude, Grok, and Codex with gates and a live status rail.",
+            "Willkommen im **Dual-Craft Team-Cockpit**. Beschreibe eine Aufgabe in Alltagssprache — "
+            "sie wird mit Gates und Live-Status an Claude, Grok und Codex verteilt.\n\n"
+            "**Wichtig:** *Vorschau* startet nichts und speichert nichts · *Dry-Run* schreibt keinen Code · "
+            "*Merge überspringen* lässt `main` unangetastet.",
             {"kind": "welcome"},
         )
 
-    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Dual-Craft Chat Cockpit")
-    print(f"  repo  : {root}")
-    print(f"  url   : http://{args.host}:{args.port}/")
-    print(f"  bind  : {args.host}:{args.port} (local only)")
-    print(f"  stop  : Ctrl+C")
+    try:
+        httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as e:
+        print(f"BLOCKED: cannot bind {args.host}:{args.port} — {e}", file=sys.stderr, flush=True)
+        print("  Is dual-chat already running?  ./dual-chat.sh --status", file=sys.stderr, flush=True)
+        print("  Or pick another port:         ./dual-chat.sh --port 8790", file=sys.stderr, flush=True)
+        return 1
+
+    print("Dual-Craft Chat Cockpit", flush=True)
+    print(f"  repo  : {root}", flush=True)
+    print(f"  url   : http://{args.host}:{args.port}/", flush=True)
+    print(f"  bind  : {args.host}:{args.port} (local only)", flush=True)
+    print("  stop  : Ctrl+C   or   ./dual-chat.sh --stop", flush=True)
+    print("READY", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nshutting down…")
+        print("\nshutting down…", flush=True)
         httpd.shutdown()
     return 0
 
