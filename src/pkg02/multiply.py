@@ -1,6 +1,6 @@
-"""WP03 — pure stdlib multiply(a, b); covers zero-product cases.
+"""WP03 — pure stdlib multiply(a, b); zero-product cases (A3).
 
-Null cases (acceptance A3): multiply(0, 5) == 0, multiply(7, 0) == 0.
+Acceptance A3: multiply(0, 5) == 0, multiply(7, 0) == 0, multiply(0, 0) == 0.
 stdlib only; no I/O; no side effects; no third-party imports.
 """
 
@@ -10,9 +10,12 @@ def multiply(a, b):
 
     Accepts int or float only (bool is rejected). int*int yields int;
     otherwise float (standard Python ``*`` semantics). Raises TypeError
-    with a clear message when either argument is not a real number type.
+    when either argument is not exactly int or float.
 
-    Zero cases: multiply(0, 5) == 0, multiply(7, 0) == 0, multiply(0, 0) == 0.
+    Zero cases (A3):
+      multiply(0, 5) == 0
+      multiply(7, 0) == 0
+      multiply(0, 0) == 0
     """
     if type(a) is not int and type(a) is not float:
         raise TypeError(

@@ -22,3 +22,8 @@
 - 2026-07-22T19:52:12.570246 | run_terminal_command | cmd: cd /home/genesis/dual-agent-craft && python3 -c "
  | → /vibe-verify or RecoveryPlaybook | RUBBER_DUCK_NEEDED (bug/error detected - see template)
 - 2026-07-22T19:52:23.655142 | run_terminal_command | cmd: cd /home/genesis/dual-agent-craft && grep -E "sock | → /vibe-verify or RecoveryPlaybook
+- 2026-07-22T19:53:54.042423 | run_terminal_command | cmd: pwd && ls -la && cat HANDOFF.md 2>/dev/null | head | → /vibe-verify or RecoveryPlaybook
+- 2026-07-22T19:54:19.162708 | run_terminal_command | cmd: cd /home/genesis/dual-agent-craft && python3 -c "
+ | → /vibe-verify or RecoveryPlaybook | RUBBER_DUCK_NEEDED (bug/error detected - see template)
+- 2026-07-22T19:54:50.282571 | run_terminal_command | cmd: cd /home/genesis/dual-agent-craft && python3 -c "
+ | → /vibe-verify or RecoveryPlaybook | RUBBER_DUCK_NEEDED (bug/error detected - see template)
