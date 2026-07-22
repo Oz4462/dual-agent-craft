@@ -94,17 +94,13 @@ EOF
 # --- Ollama scout rung (#3) -------------------------------------------------
 
 # start a fake ollama that returns a fixed {path:content} JSON map.
-# Pick a free port in the FOREGROUND (reliable on macOS CI), then bind the
-# background server to that port — avoids races with heredoc/& and bind hangs
-# before writing a port file.
+# Server binds itself and prints "PORT=<n>" + "READY" on stdout (no pre-bind —
+# macOS TIME_WAIT races if we bind/close then rebind in another process).
 start_fake_ollama() {
-  local mapjson="$1" port i
-  rm -f "$SCRATCH/oport" "$SCRATCH/fake_ollama.py" "$SCRATCH/fake_ollama.err" "$SCRATCH/fake_ollama.ready"
-  port="$(python3 -c 'import socket; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-  [[ -n "$port" ]] || { echo "start_fake_ollama: could not allocate port" >&2; return 1; }
-  printf '%s' "$port" >"$SCRATCH/oport"
+  local mapjson="$1" port i line
+  rm -f "$SCRATCH/oport" "$SCRATCH/fake_ollama.py" "$SCRATCH/fake_ollama.err" "$SCRATCH/fake_ollama.out"
   cat >"$SCRATCH/fake_ollama.py" <<'PY'
-import http.server, json, sys, os, socket
+import http.server, json, sys, os
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -117,31 +113,37 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 class S(http.server.HTTPServer):
     allow_reuse_address = True
-port = int(os.environ["PORT"])
-ready = os.environ.get("READY_FILE", "")
-srv = S(("127.0.0.1", port), H)
-if ready:
-    open(ready, "w").write("1")
+srv = S(("127.0.0.1", 0), H)
+# announce after successful bind (single process — no TIME_WAIT race)
+print("PORT=%d" % srv.server_address[1], flush=True)
+print("READY", flush=True)
 srv.serve_forever()
 PY
-  MAP="$mapjson" PORT="$port" READY_FILE="$SCRATCH/fake_ollama.ready" \
-    python3 "$SCRATCH/fake_ollama.py" \
+  # line-buffered python stdout so PORT/READY appear immediately
+  MAP="$mapjson" python3 -u "$SCRATCH/fake_ollama.py" \
     >"$SCRATCH/fake_ollama.out" 2>"$SCRATCH/fake_ollama.err" &
   FAKE_OLLAMA_PID=$!
+  port=""
   for ((i=1; i<=100; i++)); do
-    [[ -f "$SCRATCH/fake_ollama.ready" ]] && break
+    if [[ -f "$SCRATCH/fake_ollama.out" ]] && grep -q '^READY$' "$SCRATCH/fake_ollama.out" 2>/dev/null; then
+      port="$(awk -F= '/^PORT=/{print $2}' "$SCRATCH/fake_ollama.out" | tail -1)"
+      break
+    fi
     if ! kill -0 "$FAKE_OLLAMA_PID" 2>/dev/null; then
       echo "start_fake_ollama: server died; stderr:" >&2
       cat "$SCRATCH/fake_ollama.err" >&2 || true
+      cat "$SCRATCH/fake_ollama.out" >&2 || true
       return 1
     fi
     sleep 0.05
   done
-  [[ -f "$SCRATCH/fake_ollama.ready" ]] || {
-    echo "start_fake_ollama: server not ready; stderr:" >&2
+  [[ -n "$port" ]] || {
+    echo "start_fake_ollama: no PORT/READY; stderr:" >&2
     cat "$SCRATCH/fake_ollama.err" >&2 || true
+    cat "$SCRATCH/fake_ollama.out" >&2 || true
     return 1
   }
+  printf '%s' "$port" >"$SCRATCH/oport"
   export DUAL_AGENT_OLLAMA_ENDPOINT="http://127.0.0.1:${port}/api/chat"
 }
 stop_fake_ollama() {
