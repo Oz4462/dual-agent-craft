@@ -287,9 +287,12 @@ tests/run.sh                  # full offline bats suite
 ./dual-run.sh --dry-run --verify true --skip-merge
 ./lib/coordination.sh validate
 ./lib/role-router.sh profiles
+python3 scripts/secret-audit.py   # no private keys / vendor tokens in git
 ```
 
 CI: **ubuntu-latest + macos-latest** (bash 5 on macOS runners).
+
+Privacy: see **[`SECURITY.md`](./SECURITY.md)** — subscription CLIs auth outside this tree; audit PASS on tracked history.
 
 ---
 

@@ -125,6 +125,9 @@ jobs:
           python3 -c "import json;w=json.load(open('$out')); assert w['assignment'].get('claude',0)>=1"
           rm -f "$plan" "$out"
 
+
+      - name: Secret audit (no private keys / vendor tokens)
+        run: python3 scripts/secret-audit.py
       - name: Run test suite
         run: |
           set -e
