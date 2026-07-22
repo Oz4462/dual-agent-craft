@@ -1,6 +1,6 @@
-"""WP07 integrate — PLAN.md contract surface: pure stdlib multiply(a, b).
+"""WP06 integrate — PLAN.md contract surface: pure stdlib multiply(a, b).
 
-Consolidated from the path-disjoint packages src/pkg00..pkg05 (WP01-WP06),
+Consolidated from the path-disjoint packages src/pkg00..pkg04 (WP01-WP05),
 which all converged on the same fail-closed implementation. This root
 module is the public API the tests import (PLAN.md §3).
 
