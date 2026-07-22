@@ -1,19 +1,23 @@
 """WP01 core_impl — pure stdlib multiply(a, b).
 
-Contract (PLAN.md §3):
+PLAN.md §3 Interface-Contract:
   multiply(a: int | float, b: int | float) -> int | float
-  - bool is rejected (fail-closed; bool is an int subclass)
-  - int * int -> int; otherwise float (Python * semantics)
-  - TypeError on non-number inputs; no duck-typing via __mul__
-  - no I/O, no side effects, no imports beyond optional typing
+  - returns arithmetic product a * b
+  - TypeError on non-numeric args (str, None, list, …)
+    Note: str * int is valid Python (string repeat), so we reject non-numbers
+    explicitly rather than relying only on the * operator.
+  - no side effects, no I/O, no imports
+  - no string conversion, no global state
+
+Owned by package WP01 under src/pkg00/. Root multiply.py is wired by INTEGRATE.
 """
 
 
-def multiply(a, b):
-    """Return the product a * b for int/float operands only.
+def multiply(a: int | float, b: int | float) -> int | float:
+    """Return the arithmetic product of a and b.
 
-    Raises TypeError if either argument is not exactly int or float
-    (bool, str, None, list, and other types are rejected).
+    Accepts int or float only (bool is rejected even though it subclasses int).
+    Non-numeric arguments raise TypeError.
     """
     if type(a) is not int and type(a) is not float:
         raise TypeError(

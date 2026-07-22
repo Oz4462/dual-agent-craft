@@ -56,3 +56,33 @@ VERIFY_CMD: <z.B. pytest -q   oder   npm test>
 - phase complete.
 - adaptive: builder=codex assessor=claude profile=minimal team-work=true
 - BATON -> team  (next phase W)
+
+### [2026-07-22T18:01:35Z] team — W
+- Team packages done (ledger/WORK.json) — Claude+Grok+Codex all worked
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- BATON -> gate  (next phase G)
+
+### [2026-07-22T18:03:24Z] gate — G
+- Guards passed (import-scan=true test-guard=true)
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- BATON -> claude  (next phase A)
+
+### [2026-07-22T18:04:55Z] claude — A
+- Bounded cross-review → ledger/REVIEW.* (assessor=claude)
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- BATON -> claude  (next phase F)
+
+### [2026-07-22T18:11:09Z] claude — F
+- Hardened on feat/harden
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- BATON -> gate  (next phase T)
+
+### [2026-07-22T18:17:37Z] claude — C
+- Contract ready: PLAN.md — next team work (all three code)
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=minimal team-work=true
+- BATON -> team  (next phase W)

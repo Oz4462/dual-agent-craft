@@ -1,5 +1,5 @@
 # ECC for this Autonomous Grok Build
-Task: Complete full autonomous grok build: structured research-plan-implement-verify (evidence, wiring, DoD), ECC integration, auto capture+evolve | recent: 5fcc7cc team(grok): WP05 Implement: `grep -E "socket|urllib|http|requests|subprocess|os\.environ" multiply.py tests/test_multiply.py` liefert keinen Treffer (Exit-Code 1) [no-push]
+Task: Complete full autonomous grok build: structured research-plan-implement-verify (evidence, wiring, DoD), ECC integration, auto capture+evolve | Python | recent: 08e83ab contract: dual-run run-20260722-181659-1419040 [no-push]
 Use these real ECC components autonomously:
 - loop-operator (self-manage loops)
 - verification-loop-ecc + tdd-workflow-ecc (evidence + reports)
