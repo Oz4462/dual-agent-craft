@@ -45,6 +45,63 @@ td() { "$HARNESS_ROOT/lib/team-dispatch.sh" "$@"; }
 assert any(p.get("kind")=="tests" or p.get("allows_tests") for p in ps)' "$WORK"
 }
 
+@test "decompose emits integrate last + tests after integrate; interface root files" {
+  # PLAN names root module add.py via Datei: line
+  cat >"$PLAN" <<'EOF'
+# PLAN
+## 3. Interface-Contract
+# Datei: add.py (Repo-Root)
+function add(a, b) -> number
+## 4. Akzeptanzkriterien
+- [ ] add returns sum
+- [ ] empty input fails closed
+## 5. Test-Liste
+- happy path
+EOF
+  td decompose --plan "$PLAN" --out "$WORK" --task add >/dev/null
+  python3 -c '
+import json,sys
+w=json.load(open(sys.argv[1]))
+ps=w["packages"]
+kinds=[p["kind"] for p in ps]
+assert "integrate" in kinds, kinds
+assert kinds[-1]=="tests" or (kinds[-2]=="integrate" and kinds[-1]=="tests"), kinds
+# integrate immediately before tests
+integ_i=next(i for i,p in enumerate(ps) if p["kind"]=="integrate")
+tests_i=next(i for i,p in enumerate(ps) if p["kind"]=="tests")
+assert integ_i < tests_i
+integ=ps[integ_i]
+assert "add.py" in integ["paths"], integ
+assert integ.get("depends_on"), integ
+assert w.get("interface_files")==["add.py"] or "add.py" in (w.get("interface_files") or [])
+' "$WORK"
+}
+
+@test "assign: integrate package always goes to claude" {
+  cat >"$PLAN" <<'EOF'
+# PLAN
+## 3. Interface
+# Datei: foo.py
+function foo() -> None
+## 4. Akzeptanzkriterien
+- [ ] foo works
+- [ ] bar works  
+- [ ] baz works
+## 5. Test-Liste
+- t1
+EOF
+  install_fake_clis
+  td decompose --plan "$PLAN" --out "$WORK" >/dev/null
+  td assign --work "$WORK" >/dev/null
+  python3 -c '
+import json,sys
+w=json.load(open(sys.argv[1]))
+for p in w["packages"]:
+    if p.get("kind")=="integrate":
+        assert p.get("assignee")=="claude", p
+' "$WORK"
+}
+
 @test "assign gives work to claude AND grok AND codex" {
   td decompose --plan "$PLAN" --out "$WORK" >/dev/null
   run td assign --work "$WORK"

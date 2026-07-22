@@ -49,11 +49,19 @@ packages (`ledger/WORK.json`). Domain comes **only** from the current `PLAN.md`.
 
 ## Team-Work (Phase W) — all three code
 After Contract, the default is **not** a single mono-builder: `lib/team-dispatch.sh` decomposes the
-PLAN into path-disjoint packages and assigns Claude + Grok + Codex. Rules:
-- Write **only** under your package `paths[]` (trespass = fail-closed).
+PLAN into path-disjoint packages and assigns Claude + Grok + Codex. Order:
+
+1. **Impl packages** under `src/pkgNN/` (path-disjoint)
+2. **Integrate (seam)** — Claude wires PLAN interface root files (e.g. `multiply.py`) from pkg outputs
+3. **Tests** — Claude pins acceptance tests against the integrated surface
+
+Rules:
+- Write **only** under your package `paths[]` (trespass = fail-closed; harness noise ignored).
 - Exit 0 with **no file changes** under owned paths = fail-closed (not `done`).
 - Commit is done by the harness (`team(<vendor>): WP… [no-push]`).
 - Claude may pin `tests/` / `verify/` when the package allows; Grok/Codex **never** edit tests.
+- Integrate is **always Claude** (seam). Tests import the PLAN root module when specified.
+- `import-scan` treats full Python stdlib (incl. `importlib`) as allowed under “stdlib only” PLANs.
 - Baton during W is collective `team`; after W → `gate` (Guards).
 
 ```bash

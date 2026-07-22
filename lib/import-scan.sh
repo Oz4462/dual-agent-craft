@@ -47,11 +47,30 @@ done
 # Python / Node standard-library names: present in the language, NOT on any
 # registry -> must never be flagged as "invented". `__future__` is a python
 # pseudo-module (the PowerShell version wrongly 404'd it) so it is listed here.
-PY_STD="__future__ os sys re json math time datetime random collections itertools functools typing \
-pathlib subprocess threading asyncio logging io csv sqlite3 hashlib base64 urllib http socket struct \
-enum dataclasses abc contextlib argparse shutil tempfile glob copy traceback warnings inspect unittest \
-decimal fractions statistics string textwrap operator heapq bisect queue signal platform ctypes gc \
-weakref types secrets uuid zlib gzip tarfile zipfile xml html pickle"
+# Live finding: importlib was missing → false OFF-CONTRACT under "stdlib only" PLANs.
+# Prefer sys.stdlib_module_names (Py3.10+) when available; fall back to this list.
+PY_STD="$(python3 - <<'PY'
+import sys
+# Prefer the interpreter's own stdlib set (complete, version-accurate).
+names = set(getattr(sys, "stdlib_module_names", ()) or ())
+# Always keep a minimal known-good core for older Python / missing attr.
+names.update("""
+__future__ os sys re json math time datetime random collections itertools functools typing
+pathlib subprocess threading asyncio logging io csv sqlite3 hashlib base64 urllib http socket struct
+enum dataclasses abc contextlib argparse shutil tempfile glob copy traceback warnings inspect unittest
+decimal fractions statistics string textwrap operator heapq bisect queue signal platform ctypes gc
+weakref types secrets uuid zlib gzip tarfile zipfile xml html pickle importlib pkgutil
+pprint dis ast tokenize linecache keyword keyword builtins concurrent multiprocessing
+select selectors errno fcntl termios tty pwd grp resource mmap array mmap
+email mimetypes calendar locale gettext codecs locale numbers fractions
+doctest unittest.mock unittest difflib pydoc profile cProfile timeit trace
+venv ensurepip zipapp tomllib tomli_w graphlib zoneinfo ipaddress
+""".split())
+print(" ".join(sorted(n for n in names if n and not n.startswith("_") or n in ("__future__",))))
+PY
+)"
+# If python failed oddly, keep a hard-coded floor.
+[[ -n "$PY_STD" ]] || PY_STD="__future__ os sys re json math importlib pathlib typing unittest unittest.mock"
 NODE_STD="fs path http https os util events stream crypto child_process url querystring assert buffer \
 net dns zlib readline cluster tls process timers string_decoder perf_hooks worker_threads async_hooks v8 vm"
 
@@ -139,14 +158,19 @@ if [[ -z "$ALLOW" && -n "$PLAN" && -f "$PLAN" ]]; then
   ALLOW="$(PLANFILE="$PLAN" python3 <<'PY'
 import os, re
 txt = open(os.environ["PLANFILE"], encoding="utf-8", errors="replace").read()
-m = re.search(r"Erlaubte Dependencies:\s*(.+)", txt)
+# Match "Erlaubte Dependencies:" on a bullet or plain line; capture rest of line.
+m = re.search(r"(?im)^[ \t]*[-*]?\s*Erlaubte Dependencies:\s*(.+)$", txt)
 if not m:
     print(""); raise SystemExit
 val = m.group(1).strip()
-if re.fullmatch(r"(?i)stdlib[\s-]*only\.?", val):
-    print(""); raise SystemExit
+# Strip parenthetical notes: "stdlib only (Tests mit unittest …)" → "stdlib only"
+val_clean = re.sub(r"\([^)]*\)", "", val).strip().rstrip(".")
+if re.search(r"(?i)\bstdlib[\s-]*only\b", val_clean):
+    print(""); raise SystemExit  # empty allow-list; PLAN_ARMED keeps off-contract armed for 3p
 strip_chars = chr(96) + "\"'\t "   # backtick + quotes + tab + space
-parts = [p.strip(strip_chars) for p in re.split(r"[,\s]+", val) if p.strip(strip_chars)]
+parts = [p.strip(strip_chars) for p in re.split(r"[,\s]+", val_clean) if p.strip(strip_chars)]
+# Drop noise tokens from free-text dependency lines
+parts = [p for p in parts if p.lower() not in ("only", "stdlib", "and", "or", "the", "with")]
 print(",".join(parts))
 PY
 )"

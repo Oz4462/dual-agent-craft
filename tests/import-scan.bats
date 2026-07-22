@@ -17,6 +17,28 @@ scan() { run "$HARNESS_ROOT/lib/import-scan.sh" --out "$SCRATCH/scan.json" "$@";
   [ "$(jfield "$SCRATCH/scan.json" scanned)" = "2" ]
 }
 
+@test "importlib is stdlib — never OFF-CONTRACT under stdlib-only PLAN" {
+  # Live finding: importlib missing from PY_STD + PLAN "stdlib only (…)" false off-contract.
+  cat >"$SCRATCH/PLAN.md" <<'EOF'
+## 2. Stack
+- Erlaubte Dependencies: stdlib only (Tests mit unittest aus der stdlib)
+EOF
+  scan --diff-text $'+import importlib\n+from importlib import import_module\n+import unittest' \
+    --ecosystem python --plan "$SCRATCH/PLAN.md"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "PASS" ]
+}
+
+@test "stdlib-only PLAN still blocks third-party not on allowlist" {
+  echo 200 > "$REGISTRY/requests.status"
+  cat >"$SCRATCH/PLAN.md" <<'EOF'
+- Erlaubte Dependencies: stdlib only (no network)
+EOF
+  scan --diff-text $'+import requests' --ecosystem python --plan "$SCRATCH/PLAN.md"
+  [ "$status" -eq 2 ]
+  [ "$(jfield "$SCRATCH/scan.json" off_contract.0.pkg)" = "requests" ]
+}
+
 @test "invented package (registry 404) -> BLOCK exit 2" {
   scan --diff-text $'+import totallyinventedpkg' --ecosystem python
   [ "$status" -eq 2 ]

@@ -110,9 +110,9 @@ Maschinenzustand: `.dual-agent/run-state.json`. Menschliches Ledger: `HANDOFF.md
 
 ```
 1. Claude:  PLAN.md schreiben + committen, BATON -> team (Phase W)
-2. Team  :  team-dispatch (Claude+Grok+Codex path-disjunkt), BATON -> gate
+2. Team  :  team-dispatch (Claude+Grok+Codex path-disjunkt → integrate → tests), BATON -> gate
    (alt: --no-team-work → Grok/Codex mono dual-build.sh auf feat/poc)
-3. Gate :   import-scan + test-guard (team-aware) + ownership (deterministisch)
+3. Gate :   import-scan (stdlib complete) + test-guard (team-aware) + ownership
 4. Claude:  dual-review.sh (Assess + 1 Rebuttal via builder-vendor), optional Fortify
 5. Gate :   dual-merge.sh --verify ... --eval-k K --test-guard
 6. Alle:    SUGGESTIONS in HANDOFF.md -> naechster PLAN.md
