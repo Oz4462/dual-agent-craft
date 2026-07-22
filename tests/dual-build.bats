@@ -122,7 +122,8 @@ PY
   MAP="$mapjson" python3 "$SCRATCH/fake_ollama.py" "$SCRATCH/oport" \
     >"$SCRATCH/fake_ollama.out" 2>"$SCRATCH/fake_ollama.err" &
   FAKE_OLLAMA_PID=$!
-  for i in $(seq 1 100); do
+  # bash arithmetic — do NOT use `seq` (missing on stock macOS)
+  for ((i=1; i<=100; i++)); do
     [[ -s "$SCRATCH/oport" ]] && break
     if ! kill -0 "$FAKE_OLLAMA_PID" 2>/dev/null; then
       echo "start_fake_ollama: server died; stderr:" >&2
