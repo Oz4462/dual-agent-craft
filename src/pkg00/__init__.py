@@ -1,5 +1,9 @@
-def greet(name: str) -> str:
-    """Return a greeting that includes the supplied name."""
-    if not name:
-        raise ValueError("name must be non-empty")
-    return f"Hello, {name}!"
+"""WP01 — core_impl: pure stdlib multiply(a, b).
+
+Exports ``multiply`` for package discovery (same pattern as prior team packages).
+Implementation lives in ``multiply.py`` (stdlib only, no side effects).
+"""
+
+from .multiply import multiply
+
+__all__ = ["multiply"]
