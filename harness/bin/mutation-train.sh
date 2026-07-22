@@ -73,6 +73,17 @@ mutate dual-review.sh 's/fail "Claude.s ASSESS reply contained no parseable/echo
   "dual-review: garbage reply no longer blocks"
 mutate harness/bin/loop-runner.sh 's/if (( stall >= 1 )); then/if false; then/' \
   "loop-runner: STALLED detection disabled"
+# newer guards (pairing rule: every fail-closed guard gets a mutation)
+mutate lib/import-scan.sh 's/\[\[ \${#SUPPLY_LINES\[@\]} -gt 0 \]\] && blocked=true/:/' \
+  "import-scan: supply-chain block disabled"
+mutate lib/test-guard.sh 's/pytest\\\\.ini/DISABLEDpytest.ini/' \
+  "test-guard: pytest.ini config no longer guarded"
+mutate dual-merge.sh 's/\[\[ "\$cur_now" == "\$INTO" \]\] || fail/true || fail/' \
+  "dual-merge: wrong-branch checkout assertion removed"
+mutate dual-merge.sh 's/=~ \^\[0-9\]+\$ \]\] || {/=~ ^.*$ ]] || {/' \
+  "dual-merge: eval-k numeric validation defeated"
+mutate harness/operations/hooks/guard-bad-calls.sh 's/re_subst_sh="[^"]*"/re_subst_sh="MATCHNOTHING_XYZ"/' \
+  "guard: command-substitution shell-exec check defeated"
 
 # (EXIT trap already restores the tree.)
 
