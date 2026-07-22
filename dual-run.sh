@@ -301,8 +301,10 @@ advance() {
     *) agent="$(coordination_phase_agent "$phase")"
        baton="$(coordination_baton_after "$phase")" ;;
   esac
+  # Pass explicit next baton/phase so HANDOFF header matches run-state (no split-brain).
   coordination_handoff_append "$agent" "$phase" \
-    "- $note"$'\n'"- phase complete."$'\n'"- adaptive: builder=$BUILDER assessor=$ASSESS_VENDOR profile=${PROFILE_RESOLVED:-$PROFILE} team-work=$TEAM_WORK"
+    "- $note"$'\n'"- phase complete."$'\n'"- adaptive: builder=$BUILDER assessor=$ASSESS_VENDOR profile=${PROFILE_RESOLVED:-$PROFILE} team-work=$TEAM_WORK" \
+    "$baton" "$next"
   coordination_state_set_phase "$next" "$baton" "completed_$phase"
   ok "phase $phase done → next=$next baton=$baton (agent was $agent)"
 }
@@ -352,7 +354,9 @@ $(cat "$tmpl")
 EOF
     info "Claude drafting PLAN.md from --task …"
     # claude-call emits adapter-contract JSON on stdout (exit_code/text/json_log).
+    # --no-mcp + --tools "" : pure text, no playwright-mcp hang (login kept).
     ap_json="$("$_HERE/lib/claude-call.sh" --prompt-file "$promptfile" \
+      --no-mcp --tools "" \
       --disallowed-tools "Bash,Write,Edit,WebFetch,WebSearch" \
       --tag dual-run-autoplan \
       ${MODEL:+--model "$MODEL"})" \
@@ -442,18 +446,63 @@ if should_run_phase G; then
   fi
 
   if [[ "$TEST_GUARD" == true ]]; then
-    "$_HERE/lib/test-guard.sh" --poc "$POC_BRANCH" --base "$BASE_BRANCH" \
+    tg_args=(--poc "$POC_BRANCH" --base "$BASE_BRANCH")
+    # Team-work: Claude-owned test packages in WORK.json are allowed (architect pins tests).
+    # Grok/Codex test edits remain blocked (invariant 7).
+    if [[ "$TEAM_WORK" == true && -f "$_HERE/ledger/WORK.json" ]]; then
+      tg_args+=(--allow-from-work "$_HERE/ledger/WORK.json")
+    fi
+    "$_HERE/lib/test-guard.sh" "${tg_args[@]}" \
       || fail "test-guard BLOCKED — builder touched tests (invariant 7)."
-    ok "test-guard clean (builder did not edit tests)."
+    ok "test-guard clean (builder did not edit tests; team Claude tests allowed if WORK.json)."
   else
     warn "test-guard skipped (--no-test-guard)."
   fi
 
   # Ownership audit: builder must not touch Claude/harness surfaces (anti-overlap).
+  # Team-work: Claude-owned package paths (tests/integrate) are allowed; harness
+  # orchestration surfaces are exempt (see coordination.json orchestration_exempt).
   if git rev-parse --verify "$POC_BRANCH" >/dev/null 2>&1; then
     mapfile -t poc_files < <(git diff --name-only "$BASE_BRANCH...$POC_BRANCH" 2>/dev/null || true)
     if [[ ${#poc_files[@]} -gt 0 ]]; then
-      coordination_check_builder_paths "${poc_files[@]}"
+      if [[ "$TEAM_WORK" == true && -f "$_HERE/ledger/WORK.json" ]]; then
+        # Filter to product paths only for never-list check; Claude package paths allowed.
+        mapfile -t check_files < <(
+          WORK="$_HERE/ledger/WORK.json" python3 - "${poc_files[@]}" <<'PY'
+import json, os, sys
+work = json.load(open(os.environ["WORK"], encoding="utf-8"))
+claude_prefixes = []
+for p in work.get("packages") or []:
+    if p.get("assignee") not in ("claude", "architect"):
+        continue
+    for path in p.get("paths") or []:
+        path = str(path).strip().lstrip("./")
+        if not path:
+            continue
+        claude_prefixes.append(path if path.endswith("/") or path.endswith(".py") else path + "/")
+
+def claude_owns(rel: str) -> bool:
+    rel = rel.lstrip("./")
+    for p in claude_prefixes:
+        if p.endswith(".py"):
+            if rel == p:
+                return True
+        elif rel == p.rstrip("/") or rel.startswith(p):
+            return True
+    return False
+
+for f in sys.argv[1:]:
+    if not f or claude_owns(f):
+        continue
+    print(f)
+PY
+        )
+        if [[ ${#check_files[@]} -gt 0 ]]; then
+          coordination_check_builder_paths "${check_files[@]}"
+        fi
+      else
+        coordination_check_builder_paths "${poc_files[@]}"
+      fi
     fi
   fi
 
@@ -471,7 +520,8 @@ if should_run_phase A; then
   fi
   coordination_require_baton "$ASSESS_VENDOR"
 
-  review_args=(--plan "$PLAN" --poc "$POC_BRANCH" --base "$BASE_BRANCH" --assess-vendor "$ASSESS_VENDOR")
+  review_args=(--plan "$PLAN" --poc "$POC_BRANCH" --base "$BASE_BRANCH"
+               --assess-vendor "$ASSESS_VENDOR" --rebutter "$BUILDER")
   [[ -n "$MODEL" ]] && review_args+=(--model "$MODEL")
   "$_HERE/dual-review.sh" "${review_args[@]}" || fail "dual-review failed."
 
@@ -535,8 +585,12 @@ without checking."
     fi
     cat >"$fprompt" <<EOF
 You are the HARDENER in a dual-agent workflow. The BUILDER already produced a POC on this
-branch. Harden it: add/fix tests, error handling, security, docs — without changing the
-contract. Do NOT invent dependencies outside PLAN. Commit your work.
+branch. You HAVE write permissions (Write/Edit/Bash) — apply fixes in the working tree.
+
+Harden it: add/fix tests, error handling, security, docs — without changing the
+contract. Apply conceded REVIEW fixes. Do NOT invent dependencies outside PLAN.
+Write real files under this worktree. The harness will commit after you finish.
+Do NOT claim you are read-only; if a tool denies a write, retry with another approach.
 $sec_block
 
 === CONTRACT ===
@@ -547,11 +601,14 @@ $review_snip
 EOF
     # Claude operates in the harden worktree cwd (claude-call has no --cwd flag).
     # Absolute prompt path so the wrapper finds it after cd.
+    # Live finding: without --skip-permissions, headless fortify is read-only → empty harden.
     fprompt_abs="$(cd "$(dirname "$fprompt")" && pwd)/$(basename "$fprompt")"
     (
       cd "$wt" || exit 1
       "$_HERE/lib/claude-call.sh" --prompt-file "$fprompt_abs" \
         --tag dual-run-fortify \
+        --skip-permissions \
+        --allowed-tools "Read,Write,Edit,Bash,Glob,Grep" \
         ${MODEL:+--model "$MODEL"}
     ) || { git worktree remove --force "$wt" >/dev/null 2>&1 || true; fail "fortify claude-call failed."; }
 

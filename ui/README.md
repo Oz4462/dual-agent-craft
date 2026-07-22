@@ -1,55 +1,68 @@
-# Dual-Craft Chat Cockpit
+# Dual-Craft Team-Cockpit (Chat-UI)
 
-Professional local **task chat UI** for the dual-agent harness.  
-Type tasks in plain language; the server routes them through `dual-run.sh` (Claude · Grok · Codex) with live status and logs.
+Lokale **Task-Chat-Oberfläche** für den Dual-Agent-Harness.
+Aufgaben in Alltagssprache eintippen; der Server leitet sie über `dual-run.sh`
+an das Team (Claude · Grok · Codex) — mit Live-Status, Pipeline und Logs.
 
 ## Start
 
 ```bash
-# from repo root
-./dual-chat.sh                 # http://127.0.0.1:8787/  (opens browser)
-./dual-chat.sh --port 8790 --no-open
+# aus dem Repo-Root
+./dual-chat.sh                     # http://127.0.0.1:8787/  (öffnet Browser)
+./dual-chat.sh --daemon --no-open  # Hintergrund, ohne Browser
+./dual-chat.sh --status            # läuft er?
+./dual-chat.sh --stop              # beenden
 ```
 
-Windows (Git Bash / WSL):
+Wichtig: die Seite über **http://127.0.0.1:8787/** öffnen, **nicht** per `file://`.
 
-```bash
-bash ./dual-chat.sh
-```
+## Was bedeutet was? (Transparenz)
 
-Or:
+| Aktion | Wirkung |
+|---|---|
+| **Vorschau** | Nur Rollen-Zuweisung (Who-Matrix). Es startet **kein** Lauf, nichts wird gespeichert. |
+| **Dry-Run** | Lauf ohne echte Schreibzugriffe — Pakete werden nur `dry-ok` markiert, **kein Code**. |
+| **Starten** (echt) | Worker schreiben Dateien; der Harness committet lokal (`[no-push]`). |
+| **Merge überspringen** (Default) | Ergebnis bleibt auf dem Arbeits-Branch — `main` wird **nicht** verändert. |
 
-```powershell
-# after Git Bash is installed
-bash dual-chat.sh
-```
+### Fail-closed (Harness, ab jetzt)
 
-## Features
+`lib/team-dispatch.sh` markiert ein Package **nie** als `done`, wenn der
+Worker mit Exit 0 endet **ohne** echte Dateiänderungen unter den **owned paths**.
+Dann: `status=failed`, Evidence `fail-closed: … no filesystem changes`, Run stoppt.
 
-- Multi-panel cockpit: chat · mission presets · who-matrix · team packages · live log
-- Adaptive profile selector (`auto` / `minimal` / `standard` / `thorough` / `security` / `sandbox`)
-- **Preview who** (role-router only) vs **Run task** (starts dual-run)
-- Options: auto-plan, team-work, skip-merge, dry-run, fortify, verify command
-- SSE live log stream, cancel running job
-- History under `.dual-agent/chat/history.jsonl` (gitignored runtime)
+Harness-Noise (`.dual-agent/`, `ledger/`) zählt **nicht** als Implementierung.
 
-## Security
+Nach jedem echten Team-Lauf zeigt das Cockpit zusätzlich einen **Persistenz-Check**
+(`/api/persistence`): er vergleicht `ledger/WORK.json` mit git und warnt bei
+historischen „done ohne Commit/Dateien“-Fällen.
 
-- Binds **127.0.0.1** by default (set `DUAL_CHAT_ALLOW_REMOTE=1` only if you know why)
-- No API keys in the UI — uses local CLI logins
-- Does not expose raw filesystem browse APIs
+## Funktionen
 
-## API (local)
+- Chat-first-Cockpit: Chat · Vorlagen · Who-Matrix · Arbeitspakete · Live-Log (SSE)
+- Modus-Chips in der Mission-Leiste: echt / Dry-Run · Merge / kein main-Merge · Team / Solo
+- Profile: `auto` / `minimal` / `standard` / `thorough` / `security` / `sandbox`
+- Optionen (progressive disclosure): Auto-Plan, Team-Arbeit, Merge überspringen, Dry-Run, Härten, Verify
+- Lauf stoppen (SIGTERM), Verlauf unter `.dual-agent/chat/history.jsonl`
 
-| Method | Path | Purpose |
+## Sicherheit
+
+- Bindet standardmäßig **127.0.0.1** (nur lokal; `DUAL_CHAT_ALLOW_REMOTE=1` nur, wenn du weißt warum)
+- **Keine API-Keys** in der UI — nutzt die lokalen CLI-Logins
+- Kein Datei-Browser-API, Path-Traversal-Schutz für Statics
+
+## API (lokal)
+
+| Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/health` | liveness |
-| GET | `/api/status` | git, lock, ledger, CLIs, active run |
-| GET | `/api/who?task=` | adaptive assignment |
-| GET | `/api/history` | chat history |
-| POST | `/api/chat` | message + optional run |
-| POST | `/api/runs` | start run |
-| GET | `/api/runs/{id}/stream` | SSE logs |
+| GET | `/api/health` | Liveness |
+| GET | `/api/status` | git, Sperre, Ledger, CLIs, aktiver Lauf (inkl. Modus) |
+| GET | `/api/who?task=` | adaptive Rollen-Zuweisung |
+| GET | `/api/persistence` | Persistenz-Check (WORK.json vs. git) |
+| GET | `/api/history` | Chat-Verlauf |
+| POST | `/api/chat` | Nachricht + optionaler Lauf (`preview_only`, `dry_run`, …) |
+| POST | `/api/runs` | Lauf starten |
+| GET | `/api/runs/{id}/stream` | SSE-Live-Log |
 | POST | `/api/runs/{id}/cancel` | SIGTERM |
 
 ## Tests

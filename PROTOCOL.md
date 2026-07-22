@@ -109,13 +109,17 @@ orchestriert C→R→G→A→[F]→T mit exclusive lock + BATON. Fine-tuning:
 Maschinenzustand: `.dual-agent/run-state.json`. Menschliches Ledger: `HANDOFF.md`.
 
 ```
-1. Claude:  PLAN.md schreiben + committen, BATON -> grok
-2. Grok :   dual-build.sh             (baut feat/poc), BATON -> gate (Guards)
-3. Gate :   import-scan + test-guard + ownership (deterministisch)
-4. Claude:  dual-review.sh (Assess + 1 Rebuttal), optional Fortify auf feat/harden
+1. Claude:  PLAN.md schreiben + committen, BATON -> team (Phase W)
+2. Team  :  team-dispatch (Claude+Grok+Codex path-disjunkt → integrate → tests), BATON -> gate
+   (alt: --no-team-work → Grok/Codex mono dual-build.sh auf feat/poc)
+3. Gate :   import-scan (stdlib complete) + test-guard (team-aware) + ownership
+4. Claude:  dual-review.sh (Assess + 1 Rebuttal via builder-vendor), optional Fortify
 5. Gate :   dual-merge.sh --verify ... --eval-k K --test-guard
-6. Beide:   SUGGESTIONS in HANDOFF.md -> naechster PLAN.md
+6. Alle:    SUGGESTIONS in HANDOFF.md -> naechster PLAN.md
 ```
+
+**HANDOFF-Wahrheit:** `BATON`/`PHASE` im Header = nächster Holder (run-state), nicht der Static-Config-Default.
+Nach C mit Team-Work: `BATON: team`, `PHASE: W`.
 
 Anti-Overlap (strukturell, nicht nur Prompt):
 - **Exclusive dual-run lock** — zweites `./dual-run.sh` blockt, solange eines live ist.

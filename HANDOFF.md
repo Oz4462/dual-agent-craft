@@ -2,8 +2,8 @@
 
 > Kopie nach HANDOFF.md pro Feature. Jeder Turn hängt unten an, nichts wird gelöscht.
 
-BATON: claude        # wer gerade handeln darf: claude | grok | codex | team | gate | done
-PHASE: C             # C | W | R | G | A | F | T | done
+BATON: team        # ready for next dashboard task
+PHASE: W             # next dual-run starts at Contract
 CONTRACT: PLAN.md
 VERIFY_CMD: <z.B. pytest -q   oder   npm test>
 
@@ -32,3 +32,9 @@ VERIFY_CMD: <z.B. pytest -q   oder   npm test>
 ### [<timestamp>] gate — T (Test + Merge)
 - Verify pass^k: <grün/rot>. Merge: <ja/nein>.
 - BATON -> done
+
+### [2026-07-22T20:35:07Z] claude — C
+- Contract ready: PLAN.md — next team work (all three code)
+- phase complete.
+- adaptive: builder=codex assessor=claude profile=standard team-work=true
+- BATON -> team  (next phase W)

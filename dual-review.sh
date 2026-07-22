@@ -4,22 +4,24 @@
 # NOT "debate-until-consensus" (research-backed harmful: sycophantic conformity).
 # Instead ONE structured cross-examination, then the EVAL decides:
 #   1. ASSESS   Claude reviews the Builder's diff as untrusted code -> issues[]
-#   2. REBUTTAL Grok answers each issue once (concede|defend+cite|unsure) -> rebuttals[]
+#   2. REBUTTAL builder-vendor answers each issue once (concede|defend+cite|unsure)
 # Hard cap: ONE rebuttal round. Then each issue lands in:
-#   conceded            -> Grok fixes it next build
+#   conceded            -> builder fixes it next build
 #   defended+decidable  -> the EVAL (pass^k) decides
 #   defended+subjective -> TIE -> dual-tiebreak.sh (micro-probe + eval)
 #   unsure/ungrounded   -> route to eval / contract clarification (not a bluff)
 #
 # Writes ledger/REVIEW.md + ledger/REVIEW.json.
 #
-# Usage: ./dual-review.sh [--plan PLAN.md] [--poc feat/poc] [--base main] [--model M] [--dry-run]
+# Usage: ./dual-review.sh [--plan PLAN.md] [--poc feat/poc] [--base main] [--model M]
+#          [--assess-vendor claude|codex] [--rebutter grok|codex|claude] [--dry-run]
 set -uo pipefail
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$_HERE/lib/common.sh"
 
-PLAN="./PLAN.md"; POC="feat/poc"; BASE="main"; MODEL=""; DRYRUN=false; ASSESS_VENDOR="claude"
+PLAN="./PLAN.md"; POC="feat/poc"; BASE="main"; MODEL=""; DRYRUN=false
+ASSESS_VENDOR="claude"; REBUTTER="grok"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)   usage "$0"; exit 0;;
@@ -28,11 +30,17 @@ while [[ $# -gt 0 ]]; do
     --base)          BASE="${2:?value required for $1}"; shift 2;;
     --model)         MODEL="${2:?value required for $1}"; shift 2;;
     --assess-vendor) ASSESS_VENDOR="${2:?value required for $1}"; shift 2;;  # claude|codex (cross-vendor reviewer)
+    --rebutter)      REBUTTER="${2:?value required for $1}"; shift 2;;      # grok|codex|claude (= builder)
     --dry-run)       DRYRUN=true; shift;;
     *) fail "dual-review: unknown arg '$1'";;
   esac
 done
 [[ "$ASSESS_VENDOR" =~ ^(claude|codex)$ ]] || fail "dual-review: --assess-vendor must be claude or codex, got '$ASSESS_VENDOR'."
+[[ "$REBUTTER" =~ ^(grok|codex|claude)$ ]] || fail "dual-review: --rebutter must be grok|codex|claude, got '$REBUTTER'."
+# Cross-vendor moat: rebutter should not equal assessor when both are LLM vendors
+if [[ "$REBUTTER" == "$ASSESS_VENDOR" ]]; then
+  warn "dual-review: rebutter=$REBUTTER equals assess-vendor — cross-vendor moat weakened."
+fi
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Not a git repo."
 [[ -f "$PLAN" ]] || fail "Contract missing: $PLAN."
@@ -179,20 +187,39 @@ EOF
 info "[R] Grok answers (1 round, no loop) ..."
 # SECURITY (audit finding): the rebuttal prompt embeds the builder's untrusted
 # diff — never run this --always-approve turn in the real repo. Same isolation
-# as the build phase: disposable detached worktree of $POC + the deny rules
-# (deny overrides approve; blocks rm -rf / git push / curl / wget).
+# as the build phase: disposable detached worktree of $POC + deny rules.
+# Adaptive rebutter = builder vendor (grok|codex|claude), not hardcoded grok.
 reb_wt="$(mktemp -d)/reb"
 git worktree add --detach "$reb_wt" "$POC" >/dev/null 2>&1 || fail "could not create rebuttal worktree from $POC."
-# Cleanup on ANY exit — the rebuttal worktree must not leak if grok is
-# interrupted (audit P2 worktree-leak class).
+# Cleanup on ANY exit — the rebuttal worktree must not leak if interrupted.
 trap 'git worktree remove --force "$reb_wt" >/dev/null 2>&1; git worktree prune >/dev/null 2>&1' EXIT
 deny=('Bash(rm -rf *)' 'Bash(git push *)' 'Bash(curl *)' 'Bash(wget *)')
 deny_args=(); for d in "${deny[@]}"; do deny_args+=(--deny "$d"); done
-rr="$("$_HERE/lib/grok-call.sh" --prompt-file "$rebfile" --cwd "$reb_wt" --max-turns 6 \
-        --always-approve "${deny_args[@]}" ${MODEL:+--model "$MODEL"} --tag review-rebuttal)"
+info "Rebuttal via rebutter=$REBUTTER (isolated worktree)"
+rr=""
+case "$REBUTTER" in
+  grok)
+    rr="$("$_HERE/lib/grok-call.sh" --prompt-file "$rebfile" --cwd "$reb_wt" --max-turns 6 \
+            --always-approve "${deny_args[@]}" ${MODEL:+--model "$MODEL"} --tag review-rebuttal)"
+    ;;
+  codex)
+    rr="$("$_HERE/lib/codex-call.sh" --prompt-file "$rebfile" --cwd "$reb_wt" \
+            --sandbox read-only --tag review-rebuttal)"
+    ;;
+  claude)
+    # Read-only tools for rebuttal text only (no Write/Edit in worktree).
+    rr="$(
+      cd "$reb_wt" || exit 1
+      "$_HERE/lib/claude-call.sh" --prompt-file "$rebfile" \
+        --disallowed-tools "Write,Edit,Bash,NotebookEdit" \
+        ${MODEL:+--model "$MODEL"} --tag review-rebuttal
+    )"
+    ;;
+esac
 rr_exit="$(printf '%s' "$rr" | json_field_stdin exit_code)"
 git worktree remove --force "$reb_wt" >/dev/null 2>&1 || true
-[[ "$rr_exit" == 0 ]] || fail "grok-call (Rebuttal) failed."
+trap - EXIT
+[[ "$rr_exit" == 0 ]] || fail "$REBUTTER-call (Rebuttal) failed (exit_code=$rr_exit)."
 reb_text="$(printf '%s' "$rr" | python3 -c 'import sys,json;print(json.load(sys.stdin)["text"])')"
 rebuttals_json="$(REPLY_TEXT="$reb_text" python3 - <<'PY'
 import os, json, re

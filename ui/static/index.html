@@ -1,121 +1,233 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dual-Craft · Chat Cockpit</title>
-  <meta name="color-scheme" content="dark light" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Dual-Craft · Team-Cockpit</title>
+  <meta name="description" content="Lokales Multi-Agent-Cockpit: Claude · Grok · Codex" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#07060c" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
+  <!-- Ambient layers -->
+  <div class="fx" aria-hidden="true">
+    <div class="fx-mesh"></div>
+    <div class="fx-aurora"></div>
+    <canvas id="fxCanvas" class="fx-canvas"></canvas>
+    <div class="fx-vignette"></div>
+    <div class="fx-noise"></div>
+  </div>
+
   <div id="app" class="app">
-    <!-- Top bar -->
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true"></div>
-        <div class="brand-text">
-          <strong>Dual-Craft</strong>
-          <span>Chat Cockpit</span>
+    <header class="header glass">
+      <div class="header-left">
+        <button type="button" class="icon-btn" id="btnToggleNav" aria-label="Seitenleiste umschalten" title="Seitenleiste">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h11M4 17h16"/></svg>
+        </button>
+        <div class="logo">
+          <img class="logo-img" src="/static/brand.jpg" alt="" width="32" height="32" />
+          <div class="logo-text">
+            <span class="logo-name">Dual-Craft</span>
+            <span class="logo-tag">Team-Cockpit</span>
+          </div>
+        </div>
+        <div class="header-divider" aria-hidden="true"></div>
+        <div class="header-status" id="headerStatus">
+          <span class="status-chip" id="chipRun" data-state="idle">
+            <span class="status-dot"></span>
+            <span class="status-label">Bereit</span>
+          </span>
+          <span class="status-meta" id="metaBranch" title="Git-Branch">—</span>
+          <span class="status-meta dim" id="metaLock" title="Lauf-Sperre">Sperre frei</span>
         </div>
       </div>
-      <div class="topbar-meta" id="topMeta">
-        <span class="pill" id="pillBranch">branch —</span>
-        <span class="pill" id="pillLock">lock free</span>
-        <span class="pill" id="pillRun">idle</span>
-      </div>
-      <div class="topbar-actions">
-        <button type="button" class="btn ghost" id="btnRefresh" title="Refresh status">Refresh</button>
-        <button type="button" class="btn ghost" id="btnClear" title="Clear chat history">Clear</button>
-        <a class="btn ghost" href="/api/status" target="_blank" rel="noopener">API</a>
+      <div class="header-right">
+        <button type="button" class="icon-btn" id="btnRefresh" title="Aktualisieren" aria-label="Aktualisieren">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="btnTogglePanel" title="Mission-Panel" aria-label="Mission-Panel umschalten">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/></svg>
+        </button>
       </div>
     </header>
 
-    <main class="main">
-      <!-- Left: sessions / presets -->
-      <aside class="rail left">
-        <div class="rail-head">
-          <h2>Mission</h2>
-          <p class="muted">Describe work like a chat. The orchestrator routes Claude · Grok · Codex.</p>
+    <div class="body">
+      <aside class="nav glass-panel" id="nav" aria-label="Navigation">
+        <div class="nav-scroll">
+          <section class="nav-section">
+            <h2 class="nav-label">Vorlagen</h2>
+            <div class="templates" id="presets">
+              <button type="button" class="template" data-task="Einen Health-Endpoint hinzufügen, der {status:'ok'} zurückgibt, inklusive Unit-Test.">
+                <span class="template-glyph" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20.8 7.5a4.5 4.5 0 0 0-7.3-3.5L12 5l-1.5-1a4.5 4.5 0 0 0-7.3 3.5c0 5.5 8.8 11 8.8 11s8.8-5.5 8.8-11z"/></svg>
+                </span>
+                <span class="template-copy">
+                  <strong>Health-Check</strong>
+                  <small>Endpoint + Unit-Test</small>
+                </span>
+                <span class="template-shine" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="template" data-task="Kleine CLI-Rechner-App mit add und div bauen; Division durch null fail-closed; Tests inklusive.">
+                <span class="template-glyph" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
+                </span>
+                <span class="template-copy">
+                  <strong>CLI-Rechner</strong>
+                  <small>Sichere Math + Tests</small>
+                </span>
+                <span class="template-shine" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="template" data-task="OAuth-JWT-Authentifizierungs-Middleware mit sicheren Defaults und Tests hinzufügen.">
+                <span class="template-glyph" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l7 3v5c0 4.5-2.9 7.8-7 10-4.1-2.2-7-5.5-7-10V6l7-3z"/><path d="M9.5 12l1.8 1.8 3.7-3.8"/></svg>
+                </span>
+                <span class="template-copy">
+                  <strong>Auth-Middleware</strong>
+                  <small>OAuth / JWT + Security</small>
+                </span>
+                <span class="template-shine" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="template" data-task="Minimaler Spike: Hello-World-Modul, kleinster Scope.">
+                <span class="template-glyph" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13 2L4 14h7l-1 8 10-14h-7l0-6z"/></svg>
+                </span>
+                <span class="template-copy">
+                  <strong>Minimal-Spike</strong>
+                  <small>Hello-World, winzig</small>
+                </span>
+                <span class="template-shine" aria-hidden="true"></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="nav-section">
+            <h2 class="nav-label">Agenten</h2>
+            <ul class="agent-list" id="cliList"></ul>
+          </section>
+
+          <section class="nav-section">
+            <h2 class="nav-label">Letzte Gates</h2>
+            <ul class="ledger-list" id="ledgerList"></ul>
+          </section>
         </div>
-        <div class="presets" id="presets">
-          <button type="button" class="preset" data-task="Add a health endpoint that returns {status:'ok'} with a unit test.">Health endpoint + test</button>
-          <button type="button" class="preset" data-task="Build a small CLI calculator with add and div; fail closed on divide-by-zero; include tests.">CLI calculator</button>
-          <button type="button" class="preset" data-task="Add OAuth JWT authentication middleware with secure defaults and tests.">OAuth / JWT (security profile)</button>
-          <button type="button" class="preset" data-task="Tiny spike: hello world module, minimal scope.">Minimal spike</button>
-        </div>
-        <div class="rail-section">
-          <h3>CLI presence</h3>
-          <ul class="cli-list" id="cliList"></ul>
-        </div>
-        <div class="rail-section">
-          <h3>Ledger</h3>
-          <ul class="ledger-list" id="ledgerList"></ul>
+        <div class="nav-foot">
+          <button type="button" class="text-btn" id="btnClear">Chat leeren</button>
         </div>
       </aside>
 
-      <!-- Center: chat -->
-      <section class="chat-panel">
-        <div class="chat-scroll" id="chatScroll" role="log" aria-live="polite"></div>
+      <main class="chat">
+        <div class="chat-scroll" id="chatScroll" role="log" aria-live="polite" aria-relevant="additions"></div>
 
-        <div class="composer">
-          <div class="composer-toolbar">
-            <label class="field">
-              <span>Profile</span>
-              <select id="optProfile">
-                <option value="auto">auto</option>
-                <option value="minimal">minimal</option>
-                <option value="standard" selected>standard</option>
-                <option value="thorough">thorough</option>
-                <option value="security">security</option>
-                <option value="sandbox">sandbox</option>
-              </select>
-            </label>
-            <label class="field grow">
-              <span>Verify</span>
-              <input id="optVerify" type="text" value="true" spellcheck="false" />
-            </label>
-            <label class="check"><input type="checkbox" id="optAutoPlan" checked /> auto-plan</label>
-            <label class="check"><input type="checkbox" id="optTeamWork" checked /> team-work</label>
-            <label class="check"><input type="checkbox" id="optSkipMerge" checked /> skip-merge</label>
-            <label class="check"><input type="checkbox" id="optDryRun" /> dry-run</label>
-            <label class="check"><input type="checkbox" id="optFortify" /> fortify</label>
-          </div>
-          <div class="composer-row">
-            <textarea id="input" rows="3" placeholder="Describe the task in plain language… e.g. Build a CLI that converts JSON to CSV with tests."></textarea>
-            <div class="composer-actions">
-              <button type="button" class="btn secondary" id="btnPreview">Preview who</button>
-              <button type="button" class="btn primary" id="btnSend">Run task</button>
-              <button type="button" class="btn danger" id="btnCancel" disabled>Cancel</button>
+        <div class="composer-dock">
+          <div class="composer glass-strong" id="composer">
+            <div class="composer-ring" aria-hidden="true"></div>
+            <textarea
+              id="input"
+              rows="1"
+              placeholder="Beschreibe, was gebaut werden soll…"
+              aria-label="Aufgabenbeschreibung"
+            ></textarea>
+
+            <div class="composer-bar">
+              <div class="composer-bar-left">
+                <label class="select-wrap" title="Lauf-Profil">
+                  <select id="optProfile" aria-label="Profil">
+                    <option value="auto">Auto</option>
+                    <option value="minimal">Minimal</option>
+                    <option value="standard" selected>Standard</option>
+                    <option value="thorough">Gründlich</option>
+                    <option value="security">Security</option>
+                    <option value="sandbox">Sandbox</option>
+                  </select>
+                </label>
+                <button type="button" class="chip-btn" id="btnOptions" aria-expanded="false" aria-controls="optionsPanel">
+                  Optionen
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+              </div>
+              <div class="composer-bar-right">
+                <button type="button" class="btn ghost" id="btnPreview">Vorschau</button>
+                <button type="button" class="btn danger ghost" id="btnCancel" disabled hidden>Stoppen</button>
+                <button type="button" class="btn primary" id="btnSend">
+                  <span class="btn-glow" aria-hidden="true"></span>
+                  <span>Starten</span>
+                  <kbd class="kbd">⌘↵</kbd>
+                </button>
+              </div>
+            </div>
+
+            <div class="options-panel" id="optionsPanel" hidden>
+              <label class="opt"><input type="checkbox" id="optAutoPlan" checked /> Auto-Plan</label>
+              <label class="opt"><input type="checkbox" id="optTeamWork" checked /> Team-Arbeit</label>
+              <label class="opt"><input type="checkbox" id="optSkipMerge" checked /> Merge überspringen</label>
+              <label class="opt"><input type="checkbox" id="optDryRun" /> Dry-Run</label>
+              <label class="opt"><input type="checkbox" id="optFortify" /> Härten</label>
+              <label class="opt field-inline">
+                <span>Verify</span>
+                <input id="optVerify" type="text" value="true" spellcheck="false" />
+              </label>
             </div>
           </div>
-          <p class="composer-hint muted">Local only (127.0.0.1). Uses your Claude / Grok / Codex CLI logins — no API keys in the UI.</p>
+          <p class="composer-hint">Nur lokal · Enter sendet, Shift+Enter = neue Zeile · Claude · Grok · Codex · keine API-Keys im Browser</p>
         </div>
-      </section>
+      </main>
 
-      <!-- Right: mission control -->
-      <aside class="rail right">
-        <div class="rail-head">
-          <h2>Mission control</h2>
-          <p class="muted" id="whoProfile">profile —</p>
-        </div>
-        <div class="phase-track" id="phaseTrack"></div>
-        <div class="rail-section">
-          <h3>Who-matrix</h3>
-          <div class="who-table" id="whoTable"><p class="muted">Send a task or Preview who.</p></div>
-        </div>
-        <div class="rail-section">
-          <h3>Team packages</h3>
-          <div id="workRoster"><p class="muted">No WORK.json yet.</p></div>
-        </div>
-        <div class="rail-section grow">
-          <div class="rail-head-inline">
-            <h3>Live log</h3>
-            <span class="muted" id="logMeta">idle</span>
+      <aside class="panel glass-panel" id="panel" aria-label="Mission">
+        <div class="panel-head">
+          <div>
+            <h2>Mission</h2>
+            <p class="panel-sub" id="whoProfile">Noch keine Zuweisung</p>
           </div>
-          <pre class="log" id="liveLog"></pre>
         </div>
+
+        <section class="card">
+          <h3 class="card-label">Modus</h3>
+          <div class="mode-chips" id="modeChips">
+            <p class="empty-inline">Kein aktiver Lauf.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-label">Pipeline</h3>
+          <ol class="pipeline" id="phaseTrack"></ol>
+        </section>
+
+        <section class="card">
+          <h3 class="card-label">Wer macht was</h3>
+          <div class="who" id="whoTable">
+            <p class="empty-inline">Vorschau starten, um die Matrix zu sehen.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="card-label">Arbeitspakete</h3>
+          <div id="workRoster">
+            <p class="empty-inline">Erscheint bei aktiver Team-Arbeit.</p>
+          </div>
+        </section>
+
+        <section class="card" id="persistCard" hidden>
+          <h3 class="card-label">Persistenz-Check</h3>
+          <div id="persistBody"></div>
+        </section>
+
+        <section class="card card-log">
+          <div class="card-log-head">
+            <h3 class="card-label">Live-Log (CLI)</h3>
+            <div class="log-tools">
+              <span class="log-badge" id="logMeta">ruhe</span>
+              <button type="button" class="text-btn log-tool" id="btnLogCopy" title="Log kopieren">Kopieren</button>
+              <button type="button" class="text-btn log-tool" id="btnLogExpand" title="Log vergrößern">Groß</button>
+            </div>
+          </div>
+          <pre class="log" id="liveLog" aria-label="Lauf-Log wie in der CLI"></pre>
+        </section>
       </aside>
-    </main>
+    </div>
   </div>
   <script src="/static/app.js"></script>
 </body>

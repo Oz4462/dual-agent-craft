@@ -17,6 +17,44 @@ scan() { run "$HARNESS_ROOT/lib/import-scan.sh" --out "$SCRATCH/scan.json" "$@";
   [ "$(jfield "$SCRATCH/scan.json" scanned)" = "2" ]
 }
 
+@test "first-party in-repo package (src/) is not OFF-CONTRACT under stdlib-only PLAN" {
+  # Live finding: from src.pkg00.multiply import … flagged top-level "src".
+  make_repo "$SCRATCH/repo"
+  mkdir -p "$SCRATCH/repo/src/pkg00"
+  echo 'x=1' > "$SCRATCH/repo/src/pkg00/__init__.py"
+  cat >"$SCRATCH/repo/PLAN.md" <<'EOF'
+- Erlaubte Dependencies: stdlib only
+EOF
+  cd "$SCRATCH/repo"
+  scan --diff-text $'+from src.pkg00.multiply import multiply\n+import os' \
+    --ecosystem python --plan "$SCRATCH/repo/PLAN.md"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "PASS" ]
+  cd "$HARNESS_ROOT"
+}
+
+@test "importlib is stdlib — never OFF-CONTRACT under stdlib-only PLAN" {
+  # Live finding: importlib missing from PY_STD + PLAN "stdlib only (…)" false off-contract.
+  cat >"$SCRATCH/PLAN.md" <<'EOF'
+## 2. Stack
+- Erlaubte Dependencies: stdlib only (Tests mit unittest aus der stdlib)
+EOF
+  scan --diff-text $'+import importlib\n+from importlib import import_module\n+import unittest' \
+    --ecosystem python --plan "$SCRATCH/PLAN.md"
+  [ "$status" -eq 0 ]
+  [ "$(jfield "$SCRATCH/scan.json" verdict)" = "PASS" ]
+}
+
+@test "stdlib-only PLAN still blocks third-party not on allowlist" {
+  echo 200 > "$REGISTRY/requests.status"
+  cat >"$SCRATCH/PLAN.md" <<'EOF'
+- Erlaubte Dependencies: stdlib only (no network)
+EOF
+  scan --diff-text $'+import requests' --ecosystem python --plan "$SCRATCH/PLAN.md"
+  [ "$status" -eq 2 ]
+  [ "$(jfield "$SCRATCH/scan.json" off_contract.0.pkg)" = "requests" ]
+}
+
 @test "invented package (registry 404) -> BLOCK exit 2" {
   scan --diff-text $'+import totallyinventedpkg' --ecosystem python
   [ "$status" -eq 2 ]

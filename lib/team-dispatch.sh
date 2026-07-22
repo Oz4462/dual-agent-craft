@@ -148,33 +148,80 @@ if not packages and iface:
 if len(packages) == 1:
     add("error_handling", "Fail-closed edge cases and input validation", ["src/"], tags=["error_handling"])
 
-# Claude-owned tests package (architect also works — pins tests)
 dec = cfg.get("decompose") or {}
-if dec.get("always_emit_test_package_for_claude", True):
-    ttitle = "Pin acceptance tests"
-    if tests:
-        ttitle = "Pin tests: " + "; ".join(tests[:3])
-    add("tests", ttitle, ["tests/", "verify/"], allows_tests=True, tags=["tests"])
 
-# Fallback triad
+# Fallback triad (impl packages only — tests + integrate appended later)
 if len(packages) < int((cfg.get("min_packages") or 3)):
     for fb in (dec.get("fallback_packages") or []):
         if len(packages) >= 3:
             break
-        allows = fb.get("kind") == "tests"
-        paths = ["tests/", "verify/"] if allows else ["src/"]
-        add(fb.get("kind", "core_impl"), fb.get("title", "Work"), paths, allows_tests=allows, tags=[fb.get("kind", "core_impl")])
+        if fb.get("kind") == "tests":
+            continue  # tests emitted after integrate
+        paths = ["src/"]
+        add(fb.get("kind", "core_impl"), fb.get("title", "Work"), paths, allows_tests=False, tags=[fb.get("kind", "core_impl")])
 
 # Ensure unique path ownership hints: later packages get subdirs
 for i, p in enumerate(packages):
-    if p["kind"] == "tests":
-        p["paths"] = ["tests/", "verify/"]
-    elif p["kind"] == "risky_io":
+    if p["kind"] == "risky_io":
         p["paths"] = [f"src/pkg{i:02d}/", "scripts/"]
     elif p["kind"] == "security":
         p["paths"] = [f"src/pkg{i:02d}/", "src/security/"]
     else:
         p["paths"] = [f"src/pkg{i:02d}/"]
+
+# --- Integrate / seam package: wire src/pkg* → PLAN interface root files ---
+# Live finding: path-disjoint packages built under src/pkgNN/ but PLAN required
+# root multiply.py — integrate must create the contract surface.
+root_files = []
+for line in plan.splitlines():
+    m = re.search(
+        r"(?i)(?:Datei|File|Module)\s*[:`]\s*[`\"]?([A-Za-z0-9_./-]+\.py)[`\"]?",
+        line,
+    )
+    if m:
+        rf = m.group(1).lstrip("./")
+        if rf not in root_files and not rf.startswith("tests/"):
+            root_files.append(rf)
+if not root_files:
+    for sig in iface:
+        m = re.search(r"(?i)(?:function|def)\s+(\w+)", sig)
+        if m:
+            root_files.append(f"{m.group(1)}.py")
+            break
+if not root_files:
+    root_files = ["src/app.py"]
+
+impl_ids = [p["id"] for p in packages]
+impl_read = []
+for p in packages:
+    for path in p.get("paths") or []:
+        if path not in impl_read:
+            impl_read.append(path)
+
+if dec.get("always_emit_integrate_package", True) and packages:
+    add(
+        "integrate",
+        f"Integrate: wire path-disjoint packages into PLAN surface ({', '.join(root_files)})",
+        list(root_files),
+        allows_tests=False,
+        tags=["integrate", "seam"],
+    )
+    packages[-1]["depends_on"] = list(impl_ids)
+    packages[-1]["read_paths"] = list(impl_read)
+    packages[-1]["paths"] = list(root_files)  # keep root files (not remapped)
+
+# Claude-owned tests LAST — pin against integrated PLAN surface when possible
+if dec.get("always_emit_test_package_for_claude", True):
+    ttitle = "Pin acceptance tests"
+    if tests:
+        ttitle = "Pin tests: " + "; ".join(tests[:3])
+    add("tests", ttitle, ["tests/", "verify/"], allows_tests=True, tags=["tests"])
+    packages[-1]["paths"] = ["tests/", "verify/"]
+    # depend on integrate when present
+    integ = next((p for p in packages if p.get("kind") == "integrate"), None)
+    if integ:
+        packages[-1]["depends_on"] = [integ["id"]]
+        packages[-1]["read_paths"] = list(root_files) + list(impl_read)
 
 work = {
     "version": 1,
@@ -183,7 +230,8 @@ work = {
     "task": task,
     "phase": "decomposed",
     "packages": packages,
-    "policy": "path-disjoint sequential execution; all workers code",
+    "policy": "path-disjoint sequential: impl → integrate → tests; all workers code",
+    "interface_files": root_files if packages else [],
 }
 open(os.environ["OUT"], "w", encoding="utf-8").write(json.dumps(work, indent=2) + "\n")
 print(os.environ["OUT"])
@@ -230,6 +278,7 @@ if not available:
 
 prefer = (cfg.get("assignment_policy") or {}).get("prefer") or {}
 never_tests = set((cfg.get("assignment_policy") or {}).get("never_assign_tests_to") or ["grok", "codex"])
+never_integrate = set((cfg.get("assignment_policy") or {}).get("never_assign_integrate_to") or ["grok", "codex"])
 require_all = bool(cfg.get("require_all_workers", True))
 architect_works = bool(cfg.get("architect_also_works", True))
 
@@ -251,6 +300,11 @@ def score(worker, pkg):
             s -= 100
         if worker == "claude":
             s += 10
+    if pkg.get("kind") == "integrate" or "integrate" in tags or "seam" in tags:
+        if worker in never_integrate:
+            s -= 100
+        if worker == "claude":
+            s += 15
     if worker == "codex" and pkg.get("kind") in ("risky_io", "sandbox"):
         s += 5
     if worker == "grok" and pkg.get("kind") in ("core_impl", "feature", "api", "cli"):
@@ -261,12 +315,19 @@ def score(worker, pkg):
 assigned_counts = {w: 0 for w in available}
 remaining = list(range(len(packages)))
 
+def blocked_for(worker, pkg):
+    if (pkg.get("allows_tests") or pkg.get("kind") == "tests") and worker in never_tests:
+        return True
+    if (pkg.get("kind") == "integrate" or "integrate" in (pkg.get("tags") or [])) and worker in never_integrate:
+        return True
+    return False
+
 def take_for(worker):
     global remaining
     best_i, best_s = None, -10**9
     for i in remaining:
         pkg = packages[i]
-        if (pkg.get("allows_tests") or pkg.get("kind") == "tests") and worker in never_tests:
+        if blocked_for(worker, pkg):
             continue
         sc = score(worker, pkg)
         if sc > best_s:
@@ -298,7 +359,7 @@ while remaining:
     ranked = sorted(available, key=lambda w: (-score(w, pkg), assigned_counts.get(w, 0)))
     chosen = None
     for w in ranked:
-        if (pkg.get("allows_tests") or pkg.get("kind") == "tests") and w in never_tests:
+        if blocked_for(w, pkg):
             continue
         chosen = w
         break
@@ -308,6 +369,16 @@ while remaining:
     packages[i]["status"] = "assigned"
     assigned_counts[chosen] = assigned_counts.get(chosen, 0) + 1
     remaining.pop(0)
+
+# Hard guarantee: integrate packages stay on Claude (seam / architect)
+for p in packages:
+    if p.get("kind") == "integrate" or "integrate" in (p.get("tags") or []):
+        prev = p.get("assignee")
+        if prev and prev != "claude":
+            assigned_counts[prev] = max(0, assigned_counts.get(prev, 0) - 1)
+        p["assignee"] = "claude"
+        p["status"] = "assigned"
+        assigned_counts["claude"] = assigned_counts.get("claude", 0) + 1
 
 # Hard guarantee: architect works
 if architect_works and "claude" in available:
@@ -332,6 +403,44 @@ work["roster"] = {
     w: [p["id"] for p in packages if p.get("assignee") == w]
     for w in workers_cfg
 }
+
+# Path-disjointness validator (fail-closed): no prefix overlap between packages
+# unless package has shared:true (rare; not used by default decompose).
+def norm_prefixes(pkg):
+    out = []
+    for p in pkg.get("paths") or []:
+        p = str(p).strip().lstrip("./")
+        if not p:
+            continue
+        out.append(p if p.endswith("/") else p + "/")
+    return out
+
+def overlaps(a, b):
+    for x in a:
+        for y in b:
+            if x == y or x.startswith(y) or y.startswith(x):
+                return True
+    return False
+
+overlap_errs = []
+for i in range(len(packages)):
+    if packages[i].get("shared"):
+        continue
+    pi = norm_prefixes(packages[i])
+    for j in range(i + 1, len(packages)):
+        if packages[j].get("shared"):
+            continue
+        pj = norm_prefixes(packages[j])
+        if pi and pj and overlaps(pi, pj):
+            overlap_errs.append(
+                f"{packages[i].get('id')} paths {pi} overlap {packages[j].get('id')} paths {pj}"
+            )
+if overlap_errs:
+    print("BLOCKED: path-disjoint violation:", file=sys.stderr)
+    for e in overlap_errs:
+        print(f"  ! {e}", file=sys.stderr)
+    sys.exit(2)
+
 open(os.environ["OUT"], "w", encoding="utf-8").write(json.dumps(work, indent=2) + "\n")
 print(json.dumps({"out": os.environ["OUT"], "assignment": assigned_counts, "roster": work["roster"]}))
 # fairness check
@@ -340,6 +449,10 @@ if missing and len(packages) >= len(available):
     print(f"WARN: workers without packages: {missing}", file=sys.stderr)
     sys.exit(2)
 PY
+  local assign_rc=$?
+  if [[ $assign_rc -ne 0 ]]; then
+    fail "assign failed (python exit=$assign_rc) — see path-disjoint / fairness errors above"
+  fi
   ok "assigned → $out"
 }
 
@@ -388,6 +501,32 @@ PY
     return 0
   fi
 
+  # _team_mark_package <work> <idx> <status> [evidence]
+  # Optional env: FILES_JSON='["a"]' COMMIT_SHA=abc (evidence schema)
+  _team_mark_package() {
+    WORK="$1" IDX="$2" ST="$3" EV="${4:-}" python3 - <<'PY'
+import json, os
+from datetime import datetime, timezone
+w = json.load(open(os.environ["WORK"], encoding="utf-8"))
+p = w["packages"][int(os.environ["IDX"])]
+p["status"] = os.environ["ST"]
+if os.environ.get("EV"):
+    p["evidence"] = os.environ["EV"]
+fj = os.environ.get("FILES_JSON", "").strip()
+if fj:
+    try:
+        p["files_changed"] = json.loads(fj)
+    except Exception:
+        p["files_changed"] = []
+cs = os.environ.get("COMMIT_SHA", "").strip()
+if cs:
+    p["commit_sha"] = cs
+if os.environ["ST"] in ("done", "failed"):
+    p["finished_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+open(os.environ["WORK"], "w", encoding="utf-8").write(json.dumps(w, indent=2) + "\n")
+PY
+  }
+
   # Sequential path-locked execution
   for ((i=0; i<n; i++)); do
     local id assignee title kind paths_json status
@@ -407,12 +546,13 @@ PY
     command -v "$assignee" >/dev/null 2>&1 || fail "worker CLI not in PATH: $assignee (package $id)"
 
     # Mark in progress
-    WORK="$work" IDX="$i" python3 - <<'PY'
-import json,os
-w=json.load(open(os.environ["WORK"],encoding="utf-8"))
-w["packages"][int(os.environ["IDX"])]["status"]="in_progress"
-open(os.environ["WORK"],"w",encoding="utf-8").write(json.dumps(w,indent=2)+"\n")
-PY
+    _team_mark_package "$work" "$i" "in_progress" "worker=$assignee started"
+
+    # Snapshot porcelain BEFORE worker so pre-existing dirty files are not trespass.
+    local baseline_porc=""
+    if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      baseline_porc="$(git -C "$root" status --porcelain -uall 2>/dev/null || true)"
+    fi
 
     local pf tmpdir
     tmpdir="$root/.dual-agent/tmp"
@@ -428,6 +568,20 @@ PY
       fi
     fi
 
+    local integrate_note=""
+    if [[ "$kind" == "integrate" ]]; then
+      local deps_json reads_json
+      deps_json="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["packages"][int(sys.argv[2])].get("depends_on")or[]))' "$work" "$i")"
+      reads_json="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["packages"][int(sys.argv[2])].get("read_paths")or[]))' "$work" "$i")"
+      integrate_note="INTEGRATE/SEAM PACKAGE (you run LAST):
+- Depends on packages: $deps_json
+- You may READ teammate output under: $reads_json
+- WRITE only the PLAN interface surface files (OWNED PATHS): typically root modules like multiply.py
+- Re-export or consolidate the best complete implementation from src/pkg*/ into those root files.
+- tests/ should import the PLAN surface (root module), not only src/pkg*.
+- Do NOT leave the public API only inside src/pkgNN/ — the contract root file MUST exist."
+    fi
+
     cat >"$pf" <<EOF
 You are a WORKER on a 3-agent team (Claude Code + Grok + Codex). You are NOT alone:
 other teammates implement other path-disjoint packages in parallel (sequentially integrated).
@@ -437,11 +591,14 @@ PACKAGE: $id ($kind)
 TITLE: $title
 OWNED PATHS (write ONLY under these prefixes): $paths_json
 $allows_tests_note
+$integrate_note
 
 Rules:
 - Smallest correct implementation for THIS package only.
-- Do not rewrite other packages' directories.
+- Do not rewrite other packages' directories (except INTEGRATE may re-export from them).
 - No secrets. No invented dependencies outside PLAN allow-list.
+- You MUST create or modify at least one real file under OWNED PATHS.
+- Exit 0 with no filesystem changes is a FAILURE (harness fail-closed).
 - Commit is done by the harness after you finish; just write files.
 
 === FULL CONTRACT (PLAN.md) ===
@@ -462,43 +619,147 @@ EOF
           >/dev/null || rc=$?
         ;;
       claude)
-        # Claude as worker: may use Write/Edit (not assess-only disallowed)
+        # Claude as worker: Write/Edit must work headless (no interactive permission prompts).
+        # Without --skip-permissions, headless -p sessions deny every write → empty package fail-closed.
         (
           cd "$root" || exit 1
-          "$_HERE/claude-call.sh" --prompt-file "$pf" --tag "team-$id-claude"
+          "$_HERE/claude-call.sh" --prompt-file "$pf" --tag "team-$id-claude" \
+            --skip-permissions \
+            --allowed-tools "Read,Write,Edit,Bash,Glob,Grep"
         ) >/dev/null || rc=$?
         ;;
       *) fail "unknown worker $assignee";;
     esac
 
     if [[ $rc -ne 0 ]]; then
-      WORK="$work" IDX="$i" python3 - <<'PY'
-import json,os
-w=json.load(open(os.environ["WORK"],encoding="utf-8"))
-w["packages"][int(os.environ["IDX"])]["status"]="failed"
-open(os.environ["WORK"],"w",encoding="utf-8").write(json.dumps(w,indent=2)+"\n")
-PY
+      _team_mark_package "$work" "$i" "failed" "worker=$assignee exit=$rc"
       fail "team package $id failed (worker=$assignee exit=$rc)"
     fi
 
-    # Commit package work if dirty
-    if [[ -n "$(git -C "$root" status --porcelain 2>/dev/null || true)" ]]; then
-      git -C "$root" add -A
-      git -C "$root" commit -q -m "team($assignee): $id $title [no-push]" \
-        || warn "commit skipped for $id (nothing staged?)"
+    # Classify git changes: owned vs noise vs trespass.
+    # - noise (.dual-agent/, ledger/) never counts as success or trespass
+    # - owned paths must have ≥1 change (fail-closed empty)
+    # - non-noise outside owned paths = trespass (fail-closed)
+    local classify_json package_changes trespass_changes
+    classify_json="$(
+      PATHS_JSON="$paths_json" ROOT="$root" BASELINE="$baseline_porc" python3 - <<'PY'
+import json, os, subprocess
+
+root = os.environ["ROOT"]
+baseline_raw = os.environ.get("BASELINE") or ""
+
+def clean_rel(p: str) -> str:
+    """Normalize repo-relative path. NEVER use lstrip('./') — that strips dots from .dual-agent."""
+    p = str(p).strip().strip('"')
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+def parse_porc(text: str) -> dict:
+    """path -> full porcelain line (status)."""
+    m = {}
+    for ln in (text or "").splitlines():
+        if not ln.strip():
+            continue
+        path = ln[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        path = clean_rel(path)
+        m[path] = ln
+    return m
+
+prefixes = []
+for p in json.loads(os.environ.get("PATHS_JSON") or "[]"):
+    p = clean_rel(p)
+    if not p:
+        continue
+    prefixes.append(p if p.endswith("/") else p + "/")
+
+# Harness / orchestration surfaces — never success, never trespass.
+# verification/ is Grok Build workflow noise (auto-log etc.), not product scope.
+noise_prefixes = (".dual-agent/", "ledger/", "verification/", ".grok/")
+noise_names = ("HANDOFF.md", "PLAN.md", "WORK.json", "MEMORY.md", "AGENTS.md", "CLAUDE.md")
+# Common local artifacts that must never fail a package
+noise_suffixes = ("_preview.png", ".pyc")
+noise_contains = ("/__pycache__/",)
+
+def kind(rel: str) -> str:
+    rel = clean_rel(rel)
+    base = rel.rsplit("/", 1)[-1]
+    if base in noise_names or rel in noise_names:
+        return "noise"
+    if any(rel.endswith(s) for s in noise_suffixes):
+        return "noise"
+    if any(s in ("/" + rel) or s in rel for s in noise_contains):
+        return "noise"
+    if any(rel == n.rstrip("/") or rel.startswith(n) for n in noise_prefixes):
+        return "noise"
+    if not prefixes:
+        return "owned"
+    if any(rel == p.rstrip("/") or rel.startswith(p) for p in prefixes):
+        return "owned"
+    return "trespass"
+
+before = parse_porc(baseline_raw)
+try:
+    out = subprocess.check_output(
+        ["git", "status", "--porcelain", "-uall"],
+        cwd=root, text=True, stderr=subprocess.DEVNULL,
+    )
+except Exception:
+    out = ""
+after = parse_porc(out)
+
+# Only paths that are NEW or CHANGED since package start (delta).
+delta_paths = []
+for path, ln in after.items():
+    if path not in before or before[path] != ln:
+        delta_paths.append(path)
+
+owned, trespass, all_non_noise = [], [], []
+for path in sorted(delta_paths):
+    k = kind(path)
+    if k == "owned":
+        owned.append(path)
+        all_non_noise.append(path)
+    elif k == "trespass":
+        trespass.append(path)
+        all_non_noise.append(path)
+print(json.dumps({"owned": owned, "trespass": trespass, "all": all_non_noise, "delta": delta_paths}))
+PY
+    )"
+    package_changes="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print("\n".join(json.load(sys.stdin).get("owned")or[]))')"
+    trespass_changes="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print("\n".join(json.load(sys.stdin).get("trespass")or[]))')"
+
+    if [[ -n "${trespass_changes//[$'\t\r\n ']/}" ]]; then
+      FILES_JSON="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin).get("trespass")or[]))')" \
+        _team_mark_package "$work" "$i" "failed" \
+        "fail-closed: trespass outside owned paths (worker=$assignee): $(printf '%s' "$trespass_changes" | tr '\n' ' ')"
+      fail "team package $id trespass (worker=$assignee wrote outside owned paths) — fail-closed: $trespass_changes"
     fi
 
-    WORK="$work" IDX="$i" WHO="$assignee" python3 - <<'PY'
-import json,os
-from datetime import datetime, timezone
-w=json.load(open(os.environ["WORK"],encoding="utf-8"))
-p=w["packages"][int(os.environ["IDX"])]
-p["status"]="done"
-p["evidence"]=f"worker={os.environ['WHO']} finished"
-p["finished_at"]=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-open(os.environ["WORK"],"w",encoding="utf-8").write(json.dumps(w,indent=2)+"\n")
-PY
-    ok "$id done by $assignee"
+    if [[ -z "${package_changes//[$'\t\r\n ']/}" ]]; then
+      _team_mark_package "$work" "$i" "failed" \
+        "fail-closed: worker=$assignee exit=0 but no filesystem changes under package paths"
+      fail "team package $id produced no file changes (worker=$assignee) — fail-closed (done without files is forbidden)"
+    fi
+
+    # Commit package work (include full dirty tree — standard team integrate)
+    local commit_sha=""
+    if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      git -C "$root" add -A
+      git -C "$root" commit -q -m "team($assignee): $id $title [no-push]" \
+        || {
+          _team_mark_package "$work" "$i" "failed" "worker=$assignee wrote files but commit failed"
+          fail "team package $id: commit failed after writes (worker=$assignee)"
+        }
+      commit_sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+
+    FILES_JSON="$(printf '%s' "$classify_json" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin).get("owned")or[]))')" \
+      COMMIT_SHA="$commit_sha" \
+      _team_mark_package "$work" "$i" "done" "worker=$assignee finished + files committed"
+    ok "$id done by $assignee (files=$(printf '%s' "$package_changes" | wc -l) sha=${commit_sha:-n/a})"
   done
 
   WORK="$work" python3 - <<'PY'

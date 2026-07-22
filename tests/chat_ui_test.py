@@ -85,8 +85,12 @@ class ChatUiTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/", timeout=5) as r:
             html = r.read().decode("utf-8")
         self.assertIn("Dual-Craft", html)
-        self.assertIn("Chat Cockpit", html)
+        self.assertIn("btnSend", html)
+        self.assertIn("composer", html)
+        self.assertIn("lang=\"de\"", html)
+        self.assertIn("Starten", html)
         self.assertIn("/static/app.js", html)
+        self.assertIn("/static/app.css", html)
 
     def test_status(self):
         st, body = http_json("GET", self.base + "/api/status")
@@ -114,6 +118,24 @@ class ChatUiTests(unittest.TestCase):
         self.assertEqual(body["user"]["role"], "user")
         self.assertEqual(body["assistant"]["role"], "assistant")
         self.assertIsNone(body.get("run"))
+        # Deutsch + Transparenz: Vorschau speichert nichts
+        self.assertIn("Vorschau", body["assistant"]["content"])
+        self.assertIn("nichts gespeichert", body["assistant"]["content"])
+
+    def test_persistence_endpoint(self):
+        st, body = http_json("GET", self.base + "/api/persistence")
+        self.assertEqual(st, 200)
+        for key in ("ok", "packages", "warnings", "team_commits", "dirty_count"):
+            self.assertIn(key, body)
+        self.assertIsInstance(body["packages"], list)
+        self.assertIsInstance(body["warnings"], list)
+
+    def test_index_mode_and_persist_cards(self):
+        with urllib.request.urlopen(self.base + "/", timeout=5) as r:
+            html = r.read().decode("utf-8")
+        self.assertIn("modeChips", html)
+        self.assertIn("persistCard", html)
+        self.assertIn("Persistenz-Check", html)
 
     def test_history(self):
         st, body = http_json("GET", self.base + "/api/history")

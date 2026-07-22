@@ -11,7 +11,7 @@
   "assignment_policy": {
     "comment": "Capability-biased assignment with fairness: every available worker gets ≥1 package when package count allows.",
     "prefer": {
-      "claude": ["tests", "verify", "security", "error_handling", "docs", "contract_edge"],
+      "claude": ["tests", "verify", "security", "error_handling", "docs", "contract_edge", "integrate", "seam"],
       "grok": ["core_impl", "api", "cli", "feature", "happy_path"],
       "codex": ["sandbox", "filesystem", "shell", "integration", "risky_io"]
     },
@@ -21,7 +21,8 @@
       "codex": ["scripts/**", "integrations/**", "src/io/**", "src/fs/**"]
     },
     "claude_must_get_impl_or_tests": true,
-    "never_assign_tests_to": ["grok", "codex"]
+    "never_assign_tests_to": ["grok", "codex"],
+    "never_assign_integrate_to": ["grok", "codex"]
   },
 
   "execution": {
@@ -30,12 +31,16 @@
     "branch": "feat/poc",
     "integrate_strategy": "same_branch_commits",
     "max_turns_per_package": 30,
-    "stop_on_package_fail": true
+    "stop_on_package_fail": true,
+    "fail_closed_no_files": true,
+    "fail_closed_comment": "Worker CLI exit 0 without filesystem changes → package status=failed (never done). Commit required after writes."
   },
 
   "decompose": {
     "sources": ["acceptance_criteria", "interface_bullets", "test_list"],
     "always_emit_test_package_for_claude": true,
+    "always_emit_integrate_package": true,
+    "integrate_comment": "Last package wires path-disjoint src/pkg* work into the PLAN interface root files (e.g. multiply.py).",
     "fallback_packages": [
       {"id": "WP-CORE", "kind": "core_impl", "title": "Core implementation against interface contract"},
       {"id": "WP-EDGE", "kind": "error_handling", "title": "Edge cases and fail-closed behavior"},
